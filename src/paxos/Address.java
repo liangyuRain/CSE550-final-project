@@ -1,7 +1,12 @@
 package paxos;
 
+import java.io.File;
+import java.io.FileNotFoundException;
 import java.net.*;
+import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
+import java.util.Scanner;
 
 public class Address implements Comparable<Address> {
 
@@ -46,6 +51,16 @@ public class Address implements Comparable<Address> {
             }
         }
         return null;
+    }
+
+    public static Address[] getServerAddresses(String configpath) throws FileNotFoundException, UnknownHostException {
+        Scanner s = new Scanner(new File(configpath));
+        List<Address> addrs = new ArrayList<>();
+        while (s.hasNextLine()) {
+            String hostaddr = s.nextLine();
+            addrs.add(new Address(hostaddr));
+        }
+        return addrs.toArray(new Address[0]);
     }
 
 }

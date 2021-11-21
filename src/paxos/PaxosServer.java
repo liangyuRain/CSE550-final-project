@@ -455,19 +455,15 @@ public class PaxosServer extends Node {
         }
     }
 
-    private static Address[] getServerAddresses() throws FileNotFoundException, UnknownHostException {
-        Scanner s = new Scanner(new File("servers.config"));
-        List<Address> addrs = new ArrayList<>();
-        while (s.hasNextLine()) {
-            String hostaddr = s.nextLine();
-            addrs.add(new Address(hostaddr));
-        }
-        return addrs.toArray(new Address[0]);
-    }
-
     public static void main(String[] args) throws SocketException, UnknownHostException, FileNotFoundException {
+        if (args.length < 1) {
+            System.out.println("Usage: java -jar paxos_server.jar [server ips config]");
+            System.out.println("Missing [server ips config]");
+            System.exit(1);
+        }
+
         Address localAddr = Address.getLocalAddress();
-        Address[] addrs = getServerAddresses();
+        Address[] addrs = Address.getServerAddresses(args[1]);
         PaxosServer server = new PaxosServer(localAddr, addrs, new LockApplication());
         server.init();
         server.listen();

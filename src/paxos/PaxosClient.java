@@ -6,6 +6,11 @@ import application.Command;
 import application.Result;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
+import org.apache.commons.lang3.NotImplementedException;
+
+import java.io.FileNotFoundException;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 
 
 @ToString(callSuper = true)
@@ -76,4 +81,18 @@ public final class PaxosClient extends Node implements Client {
             set(t);
         }
     }
+
+    public static void main(String[] args) throws UnknownHostException, FileNotFoundException, SocketException {
+        if (args.length < 1) {
+            System.out.println("Usage: java -jar paxos_client.jar [server ips config]");
+            System.out.println("Missing [server ips config]");
+            System.exit(1);
+        }
+
+        Address localAddr = Address.getLocalAddress();
+        Address[] addrs = Address.getServerAddresses(args[1]);
+
+        throw new NotImplementedException();
+    }
+
 }
