@@ -90,7 +90,7 @@ public final class PaxosClient extends Node implements Client {
         }
 
         Address localAddr = Address.getLocalAddress();
-        Address[] addrs = Address.getServerAddresses(args[1]);
+        Address[] addrs = Address.getServerAddresses(args[0]);
 
         throw new NotImplementedException();
     }

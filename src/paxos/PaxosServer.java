@@ -463,7 +463,7 @@ public class PaxosServer extends Node {
         }
 
         Address localAddr = Address.getLocalAddress();
-        Address[] addrs = Address.getServerAddresses(args[1]);
+        Address[] addrs = Address.getServerAddresses(args[0]);
         PaxosServer server = new PaxosServer(localAddr, addrs, new LockApplication());
         server.init();
         server.listen();
