@@ -9,7 +9,7 @@ public interface Message extends Serializable {
 }
 
 @Data
-class Package {
+class Package implements Serializable {
 
     private final Address sender;
     private final Message message;

@@ -4,6 +4,7 @@ import lombok.Data;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.Serializable;
 import java.net.*;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -11,7 +12,7 @@ import java.util.List;
 import java.util.Scanner;
 
 @Data
-public class Address implements Comparable<Address> {
+public class Address implements Comparable<Address>, Serializable {
 
     public static final int PORT = 5000;
     private final String hostname;
