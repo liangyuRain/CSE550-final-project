@@ -8,3 +8,8 @@ do
   scp "${server_artifact}" "user@${line}:~/paxos_server.jar"
   scp "${ip_configs}" "user@${line}:~/${ip_configs}"
 done < "${ip_configs}"
+
+while IFS= read -r line
+do
+  ssh "user@${line}" "java -jar ~/paxos_server.jar ~/${ip_configs}" &
+done < "${ip_configs}"
