@@ -97,8 +97,9 @@ public class Node {
             }
             Class<?> timeout_class = timeout.getClass();
             try {
-                Method method = Node.this.getClass().getMethod(
+                Method method = Node.this.getClass().getDeclaredMethod(
                         "on" + timeout_class.getSimpleName(), timeout_class);
+                method.setAccessible(true);
                 method.invoke(Node.this, timeout);
             } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
                 e.printStackTrace();
@@ -141,8 +142,9 @@ public class Node {
     private void handleMessage(Message message, Address sender) {
         Class<?> messageClass = message.getClass();
         try {
-            Method method = this.getClass().getMethod(
+            Method method = this.getClass().getDeclaredMethod(
                     "handle" + messageClass.getSimpleName(), messageClass, Address.class);
+            method.setAccessible(true);
             method.invoke(this, message, sender);
         } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
             e.printStackTrace();
