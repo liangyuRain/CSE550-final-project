@@ -42,11 +42,12 @@ public class Node {
                     Socket clientSocket = serverSkt.accept();
                     executor.execute(new ReceiveTask(clientSocket));
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    log(String.format("Listen failed with %s", e.toString()));
                 }
             }
         } catch (IOException e) {
             e.printStackTrace();
+            System.exit(1);
         }
     }
 
@@ -54,9 +55,13 @@ public class Node {
         return address;
     }
 
+    protected void log(String s) {
+        LOG.info(String.format("[Server %s] %s", address().hostname(), s));
+    }
+
     protected void send(Message message, Address to) {
         executor.execute(new SendTask(message, to));
-        LOG.info(String.format("Send message %s to %s", message, to));
+        log(String.format("Send message %s to %s", message, to));
     }
 
     protected void broadcast(Message message, Collection<Address> to) {
@@ -67,7 +72,7 @@ public class Node {
         for (Address addr : to) {
             send(message, addr);
         }
-        LOG.info(String.format("Broadcast %s", message));
+        log(String.format("Broadcast %s", message));
     }
 
     protected void set(Timeout timeout) {
@@ -76,7 +81,7 @@ public class Node {
             timer = new Timer();
         }
         timer.schedule(new TimeoutTask(timeout, timer), timeout.timeoutLengthMillis());
-        LOG.info(String.format("Timeout %s set", timeout));
+        log(String.format("Timeout %s set", timeout));
     }
 
     private class TimeoutTask extends TimerTask {
@@ -91,7 +96,7 @@ public class Node {
 
         @Override
         public void run() {
-            LOG.info(String.format("Timeout %s triggered", timeout));
+            log(String.format("Timeout %s triggered", timeout));
             if (timer_thread_pool.size() < TIMER_THREAD_POOL_SIZE) {
                 timer_thread_pool.add(timer);
             }
@@ -103,6 +108,7 @@ public class Node {
                 method.invoke(Node.this, timeout);
             } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
                 e.printStackTrace();
+                System.exit(1);
             }
         }
 
@@ -125,14 +131,19 @@ public class Node {
             } else {
                 try {
                     Socket socket = new Socket(to.inetAddress(), Address.PORT);
-                    OutputStream sktOutput = socket.getOutputStream();
-                    ObjectOutputStream objOutput = new ObjectOutputStream(sktOutput);
-                    objOutput.writeObject(new Package(Node.this.address, message));
-                    objOutput.close();
-                    sktOutput.close();
+                    try {
+                        OutputStream sktOutput = socket.getOutputStream();
+                        ObjectOutputStream objOutput = new ObjectOutputStream(sktOutput);
+                        objOutput.writeObject(new Package(Node.this.address, message));
+                        objOutput.close();
+                        sktOutput.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        System.exit(1);
+                    }
                     socket.close();
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    log(String.format("Send to %s failed with %s", to.hostname(), e.toString()));
                 }
             }
         }
@@ -148,6 +159,7 @@ public class Node {
             method.invoke(this, message, sender);
         } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
             e.printStackTrace();
+            System.exit(1);
         }
     }
 
@@ -163,16 +175,21 @@ public class Node {
         public void run() {
             try {
                 InputStream sktinput = clientSocket.getInputStream();
-                ObjectInputStream objInput = new ObjectInputStream(sktinput);
-                Package pkg = (Package) objInput.readObject();
-                objInput.close();
+                try {
+                    ObjectInputStream objInput = new ObjectInputStream(sktinput);
+                    Package pkg = (Package) objInput.readObject();
+                    Message message = pkg.message();
+                    Address sender = pkg.sender();
+                    log(String.format("Got message %s from %s", message, sender));
+                    Node.this.handleMessage(message, sender);
+                    objInput.close();
+                } catch (ClassNotFoundException | IOException e) {
+                    e.printStackTrace();
+                    System.exit(1);
+                }
                 sktinput.close();
-                Message message = pkg.message();
-                Address sender = pkg.sender();
-                LOG.info(String.format("Got message %s from %s", message, sender));
-                Node.this.handleMessage(message, sender);
-            } catch (IOException | ClassNotFoundException e) {
-                e.printStackTrace();
+            } catch (IOException e) {
+                log(String.format("Receive failed with %s", e.toString()));
             }
         }
 

@@ -55,4 +55,9 @@ public class Address implements Comparable<Address>, Serializable {
         return addrs.toArray(new Address[0]);
     }
 
+    @Override
+    public String toString() {
+        return String.format("%s(%s)", this.getClass().getSimpleName(), hostname);
+    }
+
 }
