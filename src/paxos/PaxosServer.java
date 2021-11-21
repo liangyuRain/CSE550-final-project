@@ -11,6 +11,7 @@ import java.io.Serializable;
 import java.net.*;
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 
@@ -470,6 +471,7 @@ public class PaxosServer extends Node {
         Address localAddr = Address.getLocalAddress();
         Address[] addrs = Address.getServerAddresses(args[0]);
         PaxosServer server = new PaxosServer(localAddr, addrs, new LockApplication());
+        server.setLogLevel(Level.FINER);
         server.init();
         server.listen();
     }

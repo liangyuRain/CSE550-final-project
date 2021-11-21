@@ -11,6 +11,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.logging.Level;
 
 @Log
 public class Node {
@@ -21,9 +22,12 @@ public class Node {
     private final Queue<Timer> timer_thread_pool;
     private ThreadPoolExecutor executor;
 
+    private Level logLevel;
+
     public Node(Address address) {
         this.address = address;
         this.timer_thread_pool = new ConcurrentLinkedQueue<>();
+        this.logLevel = Level.ALL;
     }
 
     // let child call init first
@@ -42,7 +46,7 @@ public class Node {
                     Socket clientSocket = serverSkt.accept();
                     executor.execute(new ReceiveTask(clientSocket));
                 } catch (IOException e) {
-                    log(String.format("Listen failed with %s", e.toString()));
+                    log(Level.SEVERE, String.format("Listen failed with %s", e.toString()));
                 }
             }
         } catch (IOException e) {
@@ -55,12 +59,18 @@ public class Node {
         return address;
     }
 
-    protected void log(String s) {
-        LOG.info(String.format("[Server %s] %s", address().hostname(), s));
+    public void setLogLevel(Level level) {
+        this.logLevel = level;
+    }
+
+    protected void log(Level level, String s) {
+        if (level.intValue() >= this.logLevel.intValue()) {
+            LOG.info(String.format("[Server %s] %s", address().hostname(), s));
+        }
     }
 
     protected void send(Message message, Address to) {
-        log(String.format("Send message %s to %s", message, to));
+        log(Level.FINER, String.format("Send message %s to %s", message, to));
         executor.execute(new SendTask(message, to));
     }
 
@@ -69,7 +79,7 @@ public class Node {
     }
 
     protected void broadcast(Message message, Address[] to) {
-        log(String.format("Broadcast %s", message));
+        log(Level.FINER, String.format("Broadcast %s", message));
         for (Address addr : to) {
             send(message, addr);
         }
@@ -81,7 +91,7 @@ public class Node {
             timer = new Timer();
         }
         timer.schedule(new TimeoutTask(timeout, timer), timeout.timeoutLengthMillis());
-        log(String.format("Timeout %s set", timeout));
+        log(Level.FINEST, String.format("Timeout %s set", timeout));
     }
 
     private class TimeoutTask extends TimerTask {
@@ -96,7 +106,7 @@ public class Node {
 
         @Override
         public void run() {
-            log(String.format("Timeout %s triggered", timeout));
+            log(Level.FINEST, String.format("Timeout %s triggered", timeout));
             if (timer_thread_pool.size() < TIMER_THREAD_POOL_SIZE) {
                 timer_thread_pool.add(timer);
             }
@@ -143,7 +153,7 @@ public class Node {
                     }
                     socket.close();
                 } catch (IOException e) {
-                    log(String.format("Send to %s failed with %s", to.hostname(), e.toString()));
+                    log(Level.SEVERE, String.format("Send to %s failed with %s", to.hostname(), e.toString()));
                 }
             }
         }
@@ -180,7 +190,7 @@ public class Node {
                     Package pkg = (Package) objInput.readObject();
                     Message message = pkg.message();
                     Address sender = pkg.sender();
-                    log(String.format("Got message %s from %s", message, sender));
+                    log(Level.FINER, String.format("Got message %s from %s", message, sender));
                     Node.this.handleMessage(message, sender);
                     objInput.close();
                 } catch (ClassNotFoundException | IOException e) {
@@ -189,7 +199,7 @@ public class Node {
                 }
                 sktinput.close();
             } catch (IOException e) {
-                log(String.format("Receive failed with %s", e.toString()));
+                log(Level.SEVERE, String.format("Receive failed with %s", e.toString()));
             }
         }
 

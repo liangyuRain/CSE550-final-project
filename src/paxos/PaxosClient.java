@@ -11,6 +11,7 @@ import java.net.UnknownHostException;
 import java.util.Random;
 import java.util.Scanner;
 import java.util.StringTokenizer;
+import java.util.logging.Level;
 
 
 @ToString(callSuper = true)
@@ -103,6 +104,7 @@ public final class PaxosClient extends Node implements Client {
         long signature = new Random().nextLong();
 
         PaxosClient client = new PaxosClient(localAddr, addrs);
+        client.setLogLevel(Level.OFF);
         client.init();
         new Thread(new Runnable() {
             @Override
