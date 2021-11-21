@@ -87,7 +87,7 @@ public class PaxosServer extends Node {
     /* -------------------------------------------------------------------------
         Message Handlers
        -----------------------------------------------------------------------*/
-    private void handlePing(Ping m, Address sender) {
+    private synchronized void handlePing(Ping m, Address sender) {
         received(sender);
         int oldNum = serverExecuted.get(sender);
         if (m.nextToExecute() > oldNum && m.nextToExecute() > executed.begin) {
@@ -97,7 +97,7 @@ public class PaxosServer extends Node {
         }
     }
 
-    private void handlePaxosRequest(PaxosRequest m, Address sender) {
+    private synchronized void handlePaxosRequest(PaxosRequest m, Address sender) {
         if (!leader.equals(address())) return;
         if (leaderRole == null) { // lazy construction
             leaderRole = new Leader();
@@ -117,7 +117,7 @@ public class PaxosServer extends Node {
         }
     }
 
-    private void handlePrepareReply(PrepareReply m, Address sender) {
+    private synchronized void handlePrepareReply(PrepareReply m, Address sender) {
         received(sender);
         if (!leader.equals(address())) return;
         if (leaderRole == null) {
@@ -171,7 +171,7 @@ public class PaxosServer extends Node {
         }
     }
 
-    private void handleAcceptReply(AcceptReply m, Address sender) {
+    private synchronized void handleAcceptReply(AcceptReply m, Address sender) {
         received(sender);
         if (!leader.equals(address())) return;
         if (leaderRole == null) {
@@ -204,7 +204,7 @@ public class PaxosServer extends Node {
         }
     }
 
-    void handlePrepareRequest(PrepareRequest m, Address sender) {
+    private synchronized void handlePrepareRequest(PrepareRequest m, Address sender) {
         received(sender);
         if (!leader.equals(sender)) return;
         if (m.proposalNum().compareTo(acceptorRole.maxPrepareNum) >= 0) { // respond with promise
@@ -217,7 +217,7 @@ public class PaxosServer extends Node {
         }
     }
 
-    void handleAcceptRequest(AcceptRequest m, Address sender) {
+    private synchronized void handleAcceptRequest(AcceptRequest m, Address sender) {
         received(sender);
         if (!leader.equals(sender)) return;
         Pair<Integer, Address> proposalNum = Pair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
@@ -239,7 +239,7 @@ public class PaxosServer extends Node {
        -----------------------------------------------------------------------*/
     private boolean check = false;
 
-    void onPingTimeout(PingTimeout t) {
+    private synchronized void onPingTimeout(PingTimeout t) {
         if (check) {
             Iterator<Map.Entry<Address, Boolean>> iter = alive.entrySet().iterator();
             while (iter.hasNext()) { // check all servers' aliveness, optimized using iterator
@@ -268,7 +268,7 @@ public class PaxosServer extends Node {
         broadcast(new Ping(executed.end()), serverExecuted.keySet()); // broadcast ping message
     }
 
-    void onPrepareRequestTimeout(PrepareRequestTimeout t) {
+    private synchronized void onPrepareRequestTimeout(PrepareRequestTimeout t) {
         if (leader.equals(address()) && !leaderRole.pendingRequests.isEmpty() &&
                 leaderRole.noPrepareReply != null &&
                 leaderRole.noPrepareReply.size() >= servers.length / 2.0) {
@@ -279,7 +279,7 @@ public class PaxosServer extends Node {
         }
     }
 
-    void onAcceptRequestTimeout(AcceptRequestTimeout t) {
+    private synchronized void onAcceptRequestTimeout(AcceptRequestTimeout t) {
         if (leader.equals(address()) && !uncertain.isEmpty() &&
                 leaderRole.noPrepareReply != null &&
                 leaderRole.noPrepareReply.size() < servers.length / 2.0 &&
