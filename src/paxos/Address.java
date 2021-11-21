@@ -1,5 +1,7 @@
 package paxos;
 
+import lombok.Data;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.net.*;
@@ -8,6 +10,7 @@ import java.util.Enumeration;
 import java.util.List;
 import java.util.Scanner;
 
+@Data
 public class Address implements Comparable<Address> {
 
     public static final int PORT = 5000;
@@ -19,18 +22,6 @@ public class Address implements Comparable<Address> {
         this.hostname = hostname;
         this.inetAddress = InetAddress.getByName(hostname);
         this.inetSocketAddress = new InetSocketAddress(inetAddress, PORT);
-    }
-
-    public String getHostname() {
-        return hostname;
-    }
-
-    public InetAddress getInetAddress() {
-        return inetAddress;
-    }
-
-    public InetSocketAddress getInetSocketAddress() {
-        return inetSocketAddress;
     }
 
     @Override

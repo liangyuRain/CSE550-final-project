@@ -124,7 +124,7 @@ public class Node {
                 Node.this.handleMessage(this.message, Node.this.address);
             } else {
                 try {
-                    Socket socket = new Socket(to.getInetAddress(), Address.PORT);
+                    Socket socket = new Socket(to.inetAddress(), Address.PORT);
                     OutputStream sktOutput = socket.getOutputStream();
                     ObjectOutputStream objOutput = new ObjectOutputStream(sktOutput);
                     objOutput.writeObject(new Package(Node.this.address, message));
