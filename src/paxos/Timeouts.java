@@ -5,7 +5,7 @@ import lombok.Data;
 
 @Data
 final class ClientTimeout implements Timeout {
-    private static final int CLIENT_RETRY_MILLIS = 100;
+    private static final int CLIENT_RETRY_MILLIS = 1000;
 
     private final AMOCommand command;
 
@@ -17,7 +17,8 @@ final class ClientTimeout implements Timeout {
 
 @Data
 final class PingTimeout implements Timeout {
-    private static final int PING_INTERVAL_MILLIS = 50;
+//    private static final int PING_INTERVAL_MILLIS = 50;
+    private static final int PING_INTERVAL_MILLIS = 5000;
 
     @Override
     public int timeoutLengthMillis() {

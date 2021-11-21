@@ -7,10 +7,10 @@ import java.io.Serializable;
 @Data
 public class LockCommand implements Serializable, Command {
 
-    enum Operation {LOCK, UNLOCK}
+    public enum Operation {LOCK, UNLOCK}
 
-    private Operation operation;
-    private long locknum;
-    private long signature;
+    private final Operation operation;
+    private final long locknum;
+    private final long signature;
 
 }

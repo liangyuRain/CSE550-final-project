@@ -398,7 +398,7 @@ public class PaxosServer extends Node {
 
     @ToString
     @EqualsAndHashCode
-    class Slots implements Serializable { // data structure to represents slots
+    static class Slots implements Serializable { // data structure to represents slots
 
         LinkedList<AMOCommand> commands;
         int begin; // the slot number of the first command

@@ -60,8 +60,8 @@ public class Node {
     }
 
     protected void send(Message message, Address to) {
-        executor.execute(new SendTask(message, to));
         log(String.format("Send message %s to %s", message, to));
+        executor.execute(new SendTask(message, to));
     }
 
     protected void broadcast(Message message, Collection<Address> to) {
@@ -69,10 +69,10 @@ public class Node {
     }
 
     protected void broadcast(Message message, Address[] to) {
+        log(String.format("Broadcast %s", message));
         for (Address addr : to) {
             send(message, addr);
         }
-        log(String.format("Broadcast %s", message));
     }
 
     protected void set(Timeout timeout) {

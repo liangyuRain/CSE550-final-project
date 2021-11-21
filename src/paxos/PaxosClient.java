@@ -1,9 +1,6 @@
 package paxos;
 
-import application.AMOCommand;
-import application.AMOResult;
-import application.Command;
-import application.Result;
+import application.*;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
 import org.apache.commons.lang3.NotImplementedException;
@@ -11,6 +8,9 @@ import org.apache.commons.lang3.NotImplementedException;
 import java.io.FileNotFoundException;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.util.Random;
+import java.util.Scanner;
+import java.util.StringTokenizer;
 
 
 @ToString(callSuper = true)
@@ -32,7 +32,7 @@ public final class PaxosClient extends Node implements Client {
 
     @Override
     public synchronized void init() {
-        // No need to initialize
+        super.init();
     }
 
     /* -------------------------------------------------------------------------
@@ -77,6 +77,8 @@ public final class PaxosClient extends Node implements Client {
        -----------------------------------------------------------------------*/
     private synchronized void onClientTimeout(ClientTimeout t) {
         if (t.command().equals(currentCommand) && result == null) {
+            System.out.printf("Command %s timeout%n", currentCommand);
+
             broadcast(new PaxosRequest(currentCommand), servers);
             set(t);
         }
@@ -87,7 +89,8 @@ public final class PaxosClient extends Node implements Client {
                 "[%1$tF %1$tT %1$tL] %5$s %n");
     }
 
-    public static void main(String[] args) throws UnknownHostException, FileNotFoundException, SocketException {
+    public static void main(String[] args)
+            throws UnknownHostException, FileNotFoundException, SocketException, InterruptedException {
         if (args.length < 1) {
             System.out.println("Usage: java -jar paxos_client.jar [server ips config]");
             System.out.println("Missing [server ips config]");
@@ -97,7 +100,53 @@ public final class PaxosClient extends Node implements Client {
         Address localAddr = Address.getLocalAddress();
         Address[] addrs = Address.getServerAddresses(args[0]);
 
-        throw new NotImplementedException();
+        long signature = new Random().nextLong();
+
+        PaxosClient client = new PaxosClient(localAddr, addrs);
+        client.init();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                client.listen();
+            }
+        }).start();
+
+        Scanner console = new Scanner(System.in);
+        for (; ; ) {
+            System.out.print("> ");
+
+            String line = console.nextLine();
+            StringTokenizer st = new StringTokenizer(line);
+
+            LockCommand cmd = null;
+            try {
+                String opt = st.nextToken().toUpperCase();
+                long locknum = Long.parseLong(st.nextToken());
+
+
+                if (opt.equals("LOCK")) {
+                    cmd = new LockCommand(LockCommand.Operation.LOCK, locknum, signature);
+                } else if (opt.equals("UNLOCK")) {
+                    cmd = new LockCommand(LockCommand.Operation.UNLOCK, locknum, signature);
+                } else {
+                    throw new IllegalArgumentException();
+                }
+            } catch (Exception e) {
+                System.out.println("Illegal input, usage: [lock/unlock] [locknum]");
+            }
+
+            if (cmd != null) {
+                client.sendCommand(cmd);
+                synchronized (client) {
+                    while (!client.hasResult()) {
+                        client.wait(1000);
+                    }
+                }
+                Result res = client.getResult();
+
+                System.out.printf("%s%n", res.toString());
+            }
+        }
     }
 
 }
