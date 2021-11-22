@@ -55,7 +55,7 @@ public class Node {
                 }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            log(e);
             System.exit(1);
         }
     }
@@ -72,6 +72,17 @@ public class Node {
         if (level.intValue() >= this.logLevel.intValue()) {
             LOG.info(String.format("[Server %s] %s", address().hostname(), s));
         }
+    }
+
+    protected void log(Exception e) {
+        StringWriter sw = new StringWriter();
+        PrintWriter pw = new PrintWriter(sw);
+        e.printStackTrace(pw);
+        pw.write(' ');
+        pw.write(e.toString());
+        pw.flush();
+        log(Level.SEVERE, sw.toString());
+        pw.close();
     }
 
     protected void send(Message message, Address to) {
@@ -122,7 +133,7 @@ public class Node {
                 method.setAccessible(true);
                 method.invoke(Node.this, timeout);
             } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-                e.printStackTrace();
+                log(e);
                 System.exit(1);
             }
         }
@@ -153,7 +164,7 @@ public class Node {
                         objOutput.close();
                         sktOutput.close();
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        log(e);
                         System.exit(1);
                     }
                     socket.close();
@@ -173,7 +184,7 @@ public class Node {
             method.setAccessible(true);
             method.invoke(this, message, sender);
         } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-            e.printStackTrace();
+            log(e);
             System.exit(1);
         }
     }
@@ -199,7 +210,7 @@ public class Node {
                     Node.this.handleMessage(message, sender);
                     objInput.close();
                 } catch (ClassNotFoundException | IOException e) {
-                    e.printStackTrace();
+                    log(e);
                     System.exit(1);
                 }
                 sktinput.close();
