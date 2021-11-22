@@ -16,6 +16,11 @@ import java.util.logging.Level;
 @Log
 public class Node {
 
+    static {
+        System.setProperty("java.util.logging.SimpleFormatter.format",
+                "[%1$tF %1$tT %1$tL] %5$s %n");
+    }
+
     private final Address address;
 
     private static final int TIMER_THREAD_POOL_SIZE = 8;

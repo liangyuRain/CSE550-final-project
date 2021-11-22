@@ -456,11 +456,6 @@ public class PaxosServer extends Node {
         }
     }
 
-    static {
-        System.setProperty("java.util.logging.SimpleFormatter.format",
-                "[%1$tF %1$tT %1$tL] %5$s %n");
-    }
-
     public static void main(String[] args) throws SocketException, UnknownHostException, FileNotFoundException {
         if (args.length < 1) {
             System.out.println("Usage: java -jar paxos_server.jar [server ips config]");

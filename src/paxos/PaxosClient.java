@@ -85,11 +85,6 @@ public final class PaxosClient extends Node implements Client {
         }
     }
 
-    static {
-        System.setProperty("java.util.logging.SimpleFormatter.format",
-                "[%1$tF %1$tT %1$tL] %5$s %n");
-    }
-
     public static void main(String[] args)
             throws UnknownHostException, FileNotFoundException, SocketException, InterruptedException {
         if (args.length < 1) {
