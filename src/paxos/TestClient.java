@@ -17,7 +17,7 @@ public class TestClient {
 
     public static void main(String[] args) throws SocketException, UnknownHostException, FileNotFoundException, InterruptedException {
         if (args.length < 1) {
-            System.out.println("Usage: java -jar paxos_client.jar [server ips config]");
+            System.out.println("Usage: java -jar test_client.jar [server ips config]");
             System.out.println("Missing [server ips config]");
             System.exit(1);
         }
