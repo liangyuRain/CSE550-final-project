@@ -209,6 +209,8 @@ public class Node {
                     log(Level.FINER, String.format("Got message %s from %s", message, sender));
                     Node.this.handleMessage(message, sender);
                     objInput.close();
+                } catch (OptionalDataException e) { // Incomplete package?
+                    log(e);
                 } catch (ClassNotFoundException | IOException e) {
                     log(e);
                     System.exit(1);
