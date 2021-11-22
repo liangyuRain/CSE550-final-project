@@ -210,7 +210,7 @@ public class Node {
                     Node.this.handleMessage(message, sender);
                     objInput.close();
                 } catch (OptionalDataException e) { // Incomplete package?
-                    log(e);
+                    throw e;
                 } catch (ClassNotFoundException | IOException e) {
                     log(e);
                     System.exit(1);
