@@ -89,12 +89,7 @@ public class PaxosServer extends Node {
        -----------------------------------------------------------------------*/
     private synchronized void handlePing(Ping m, Address sender) {
         received(sender);
-        int oldNum = serverExecuted.get(sender);
-        if (m.nextToExecute() > oldNum && m.nextToExecute() > executed.begin) {
-            serverExecuted.put(sender, m.nextToExecute());
-            executed.gc(serverExecuted.values().stream().min(Integer::compare).get()); // garbage collect commands that
-            // every server has executed
-        }
+        garbageCollect(m.nextToExecute(), sender);
     }
 
     private synchronized void handlePaxosRequest(PaxosRequest m, Address sender) {
@@ -173,6 +168,7 @@ public class PaxosServer extends Node {
 
     private synchronized void handleAcceptReply(AcceptReply m, Address sender) {
         received(sender);
+        garbageCollect(m.nextToExecute(), sender);
         if (!leader.equals(address())) return;
         if (leaderRole == null) {
             leaderRole = new Leader();
@@ -219,6 +215,7 @@ public class PaxosServer extends Node {
 
     private synchronized void handleAcceptRequest(AcceptRequest m, Address sender) {
         received(sender);
+        garbageCollect(m.nextToExecute(), sender);
         if (!leader.equals(sender)) return;
         Pair<Integer, Address> proposalNum = Pair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
         if (proposalNum.compareTo(acceptorRole.maxPrepareNum) >= 0) { // accept the request and sync with leader state
@@ -231,7 +228,7 @@ public class PaxosServer extends Node {
             // the proposed commands may be rejected by other majority of servers, so they cannot be executed and stored
             // in uncertain
         }
-        send(new AcceptReply(m.acceptNum(), acceptorRole.maxPrepareNum), sender);
+        send(new AcceptReply(m.acceptNum(), acceptorRole.maxPrepareNum, executed.end()), sender);
     }
 
     /* -------------------------------------------------------------------------
@@ -296,7 +293,7 @@ public class PaxosServer extends Node {
             }
             broadcast(new AcceptRequest(
                     Triple.of(leaderRole.proposalNum.left, leaderRole.proposalNum.right, leaderRole.acceptRound),
-                    executed, uncertain), leaderRole.noAcceptReply);
+                    executed, uncertain, executed.end()), leaderRole.noAcceptReply);
         } else {
             acceptTimeoutSet = false;
         }
@@ -378,7 +375,7 @@ public class PaxosServer extends Node {
             }
             acceptorRole.maxAcceptNum = new ImmutableTriple<>(proposalNum.left, proposalNum.right, acceptRound);
             broadcast(new AcceptRequest(Triple.of(proposalNum.left, proposalNum.right, acceptRound),
-                    executed, uncertain), noAcceptReply);
+                    executed, uncertain, executed.end()), noAcceptReply);
         }
 
     }
@@ -423,6 +420,15 @@ public class PaxosServer extends Node {
             }
         }
 
+    }
+
+    private void garbageCollect(int nextToExecute, Address sender) {
+        int oldNum = serverExecuted.get(sender);
+        if (nextToExecute > oldNum && nextToExecute > executed.begin) {
+            serverExecuted.put(sender, nextToExecute);
+            executed.gc(serverExecuted.values().stream().min(Integer::compare).get()); // garbage collect commands that
+            // every server has executed
+        }
     }
 
     // execute and record other sequence of commands without repeat using slot number

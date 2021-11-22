@@ -17,8 +17,7 @@ final class ClientTimeout implements Timeout {
 
 @Data
 final class PingTimeout implements Timeout {
-//    private static final int PING_INTERVAL_MILLIS = 50;
-    private static final int PING_INTERVAL_MILLIS = 5000;
+    private static final int PING_INTERVAL_MILLIS = 50;
 
     @Override
     public int timeoutLengthMillis() {

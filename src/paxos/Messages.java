@@ -46,6 +46,7 @@ class AcceptRequest implements Message {
     private final PaxosServer.Slots executed;
     @NonNull
     private final LinkedHashSet<AMOCommand> uncertain;
+    private final int nextToExecute;
 
 }
 
@@ -56,5 +57,6 @@ class AcceptReply implements Message { // success iff acceptNum >= maxProposalNu
     private final Triple<Integer, Address, Integer> acceptNum;
     @NonNull
     private final Pair<Integer, Address> maxProposalNum;
+    private final int nextToExecute;
 
 }
