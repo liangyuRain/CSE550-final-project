@@ -28,7 +28,7 @@ public class TestClient {
         long signature = new Random().nextLong();
 
         PaxosClient client = new PaxosClient(localAddr, addrs);
-        client.setLogLevel(Level.ALL);
+        client.setLogLevel(Level.SEVERE);
         client.init();
         new Thread(new Runnable() {
             @Override
@@ -44,7 +44,9 @@ public class TestClient {
             long locknum = signature * r.nextInt(TEST_KEY_NUM);
             LockCommand.Operation opt = r.nextBoolean() ? LockCommand.Operation.LOCK : LockCommand.Operation.UNLOCK;
 
-            LockCommand cmd = new LockCommand(LockCommand.Operation.LOCK, locknum, signature);
+            LockCommand cmd = new LockCommand(opt, locknum, signature);
+
+            client.log(Level.SEVERE, String.format("Sending command: %s", cmd));
 
             client.sendCommand(cmd);
             synchronized (client) {
@@ -55,7 +57,12 @@ public class TestClient {
             Result res = client.getResult();
             Result res2 = app.execute(cmd);
 
-            assert(res == res2);
+            client.log(Level.SEVERE, String.format("Received result: %s, Expected result: %s", res, res2));
+
+            if (!res.equals(res2)) {
+                client.log(Level.SEVERE, "Result does not match");
+                System.exit(1);
+            }
         }
     }
 
