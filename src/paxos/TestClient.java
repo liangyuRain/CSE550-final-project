@@ -11,6 +11,8 @@ import java.net.UnknownHostException;
 import java.util.Random;
 import java.util.logging.Level;
 
+import java.lang.Thread;
+
 public class TestClient {
 
     public static final int TEST_KEY_NUM = 10;
@@ -28,7 +30,7 @@ public class TestClient {
         long signature = new Random().nextLong();
 
         PaxosClient client = new PaxosClient(localAddr, addrs);
-        client.setLogLevel(Level.SEVERE);
+        client.setLogLevel(Level.OFF);
         client.init();
         new Thread(new Runnable() {
             @Override
@@ -41,12 +43,12 @@ public class TestClient {
         Random r = new Random();
 
         for (; ; ) {
-            long locknum = signature * r.nextInt(TEST_KEY_NUM);
+            long locknum = signature * (1 + r.nextInt(TEST_KEY_NUM));
             LockCommand.Operation opt = r.nextBoolean() ? LockCommand.Operation.LOCK : LockCommand.Operation.UNLOCK;
 
             LockCommand cmd = new LockCommand(opt, locknum, signature);
 
-            client.log(Level.SEVERE, String.format("Sending command: %s", cmd));
+            System.out.printf("Sending command: %s%n", cmd);
 
             client.sendCommand(cmd);
             synchronized (client) {
@@ -57,12 +59,14 @@ public class TestClient {
             Result res = client.getResult();
             Result res2 = app.execute(cmd);
 
-            client.log(Level.SEVERE, String.format("Received result: %s, Expected result: %s", res, res2));
+            System.out.printf("Received result: %s, Expected result: %s%n", res, res2);
 
             if (!res.equals(res2)) {
-                client.log(Level.SEVERE, "Result does not match");
+                System.out.println("Result does not match");
                 System.exit(1);
             }
+
+            Thread.sleep(1000);
         }
     }
 
