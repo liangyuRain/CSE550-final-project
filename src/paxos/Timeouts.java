@@ -17,7 +17,7 @@ final class ClientTimeout implements Timeout {
 
 @Data
 final class PingTimeout implements Timeout {
-    private static final int PING_INTERVAL_MILLIS = 50;
+    private static final int PING_INTERVAL_MILLIS = 1000;
 
     @Override
     public int timeoutLengthMillis() {
@@ -27,7 +27,7 @@ final class PingTimeout implements Timeout {
 
 @Data
 final class PrepareRequestTimeout implements Timeout {
-    private static final int PREPARE_TIMEOUT = 50;
+    private static final int PREPARE_TIMEOUT = 1000;
 
     @Override
     public int timeoutLengthMillis() {
@@ -37,7 +37,7 @@ final class PrepareRequestTimeout implements Timeout {
 
 @Data
 final class AcceptRequestTimeout implements Timeout {
-    private static final int ACCEPT_TIMEOUT = 50;
+    private static final int ACCEPT_TIMEOUT = 1000;
 
     @Override
     public int timeoutLengthMillis() {
