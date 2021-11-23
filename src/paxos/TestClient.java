@@ -6,6 +6,7 @@ import application.LockCommand;
 import application.Result;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.Random;
@@ -17,7 +18,7 @@ public class TestClient {
 
     public static final int TEST_KEY_NUM = 10;
 
-    public static void main(String[] args) throws SocketException, UnknownHostException, FileNotFoundException, InterruptedException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         if (args.length < 1) {
             System.out.println("Usage: java -jar test_client.jar [server ips config]");
             System.out.println("Missing [server ips config]");

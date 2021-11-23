@@ -11,7 +11,9 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.logging.FileHandler;
 import java.util.logging.Level;
+import java.util.logging.SimpleFormatter;
 
 @Log
 public class Node {
@@ -29,10 +31,14 @@ public class Node {
 
     private Level logLevel;
 
-    public Node(Address address) {
+    public Node(Address address) throws IOException {
         this.address = address;
         this.timer_thread_pool = new ConcurrentLinkedQueue<>();
         this.logLevel = Level.ALL;
+
+        FileHandler fh = new FileHandler("paxos_server.log");
+        fh.setFormatter(new SimpleFormatter());
+        LOG.addHandler(fh);
     }
 
     // let child call init first

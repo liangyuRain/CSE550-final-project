@@ -6,6 +6,7 @@ import lombok.ToString;
 import org.apache.commons.lang3.tuple.*;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.Serializable;
 import java.net.*;
 import java.util.*;
@@ -42,7 +43,7 @@ public class PaxosServer extends Node {
     /* -------------------------------------------------------------------------
         Construction and Initialization
        -----------------------------------------------------------------------*/
-    public PaxosServer(Address address, Address[] servers, Application app) {
+    public PaxosServer(Address address, Address[] servers, Application app) throws IOException {
         super(address);
         this.servers = servers;
 
@@ -492,7 +493,7 @@ public class PaxosServer extends Node {
         }
     }
 
-    public static void main(String[] args) throws SocketException, UnknownHostException, FileNotFoundException {
+    public static void main(String[] args) throws IOException {
         if (args.length < 1) {
             System.out.println("Usage: java -jar paxos_server.jar [server ips config]");
             System.out.println("Missing [server ips config]");
