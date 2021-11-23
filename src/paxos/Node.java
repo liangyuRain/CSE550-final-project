@@ -142,6 +142,8 @@ public class Node {
 
     private class SendTask implements Runnable {
 
+        public static final int CONNECTION_TIMEOUT = 3000;
+
         private final Message message;
         private final Address to;
 
@@ -156,7 +158,8 @@ public class Node {
                 Node.this.handleMessage(this.message, Node.this.address);
             } else {
                 try {
-                    Socket socket = new Socket(to.inetAddress(), Address.PORT);
+                    Socket socket = new Socket();
+                    socket.connect(to.inetSocketAddress(), CONNECTION_TIMEOUT);
                     try {
                         OutputStream sktOutput = socket.getOutputStream();
                         ObjectOutputStream objOutput = new ObjectOutputStream(sktOutput);
