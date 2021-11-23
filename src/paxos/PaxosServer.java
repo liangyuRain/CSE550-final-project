@@ -5,7 +5,6 @@ import lombok.EqualsAndHashCode;
 import lombok.ToString;
 import org.apache.commons.lang3.tuple.*;
 
-import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.Serializable;
 import java.net.*;
@@ -205,7 +204,7 @@ public class PaxosServer extends Node {
         if (!leader.equals(sender)) return;
         if (m.proposalNum().compareTo(acceptorRole.maxPrepareNum) >= 0) { // respond with promise
             acceptorRole.maxPrepareNum = m.proposalNum();
-            send(new PrepareReply(m.proposalNum(), executed, uncertain,
+            send(new PrepareReply(m.proposalNum(), executed.startFrom(serverExecuted.get(sender)), uncertain,
                     acceptorRole.maxAcceptNum, acceptorRole.maxPrepareNum), sender);
         } else { // reject
             send(new PrepareReply(m.proposalNum(), null, null,
@@ -270,7 +269,10 @@ public class PaxosServer extends Node {
                 leaderRole.noPrepareReply != null &&
                 leaderRole.noPrepareReply.size() >= servers.length / 2.0) {
             set(t);
-            broadcast(new PrepareRequest(leaderRole.proposalNum), leaderRole.noPrepareReply);
+            List<Address> aliveDests = leaderRole.noPrepareReply.stream()
+                    .filter(alive::containsKey)
+                    .collect(Collectors.toList());
+            broadcast(new PrepareRequest(leaderRole.proposalNum), aliveDests);
         } else {
             prepareTimeoutSet = false;
         }
@@ -284,6 +286,7 @@ public class PaxosServer extends Node {
                 leaderRole.noAcceptReply.size() >= servers.length / 2.0) {
             set(t);
             List<Address> senders = leaderRole.noPrepareReply.stream()
+                    .filter(alive::containsKey)
                     .filter(leaderRole.noAcceptReply::contains)
                     .collect(Collectors.toList());
             if (!senders.isEmpty()) { // in case some server still not receive prepare request so cannot respond
@@ -291,9 +294,16 @@ public class PaxosServer extends Node {
                 // prepare reply nor accept reply
                 broadcast(new PrepareRequest(leaderRole.proposalNum), senders);
             }
+            List<Address> aliveDests = leaderRole.noAcceptReply.stream()
+                    .filter(alive::containsKey)
+                    .collect(Collectors.toList());
             broadcast(new AcceptRequest(
                     Triple.of(leaderRole.proposalNum.left, leaderRole.proposalNum.right, leaderRole.acceptRound),
-                    executed, uncertain, executed.end()), leaderRole.noAcceptReply);
+                    executed.startFrom(aliveDests.stream()
+                            .map(serverExecuted::get)
+                            .min(Integer::compare)
+                            .orElse(Integer.MIN_VALUE)),
+                    uncertain, executed.end()), aliveDests);
         } else {
             acceptTimeoutSet = false;
         }
@@ -374,8 +384,15 @@ public class PaxosServer extends Node {
                 set(acceptTimeout);
             }
             acceptorRole.maxAcceptNum = new ImmutableTriple<>(proposalNum.left, proposalNum.right, acceptRound);
+            List<Address> aliveDests = noAcceptReply.stream()
+                    .filter(alive::containsKey)
+                    .collect(Collectors.toList());
             broadcast(new AcceptRequest(Triple.of(proposalNum.left, proposalNum.right, acceptRound),
-                    executed, uncertain, executed.end()), noAcceptReply);
+                    executed.startFrom(aliveDests.stream()
+                            .map(serverExecuted::get)
+                            .min(Integer::compare)
+                            .orElse(Integer.MIN_VALUE)),
+                    uncertain, executed.end()), aliveDests);
         }
 
     }
@@ -418,6 +435,19 @@ public class PaxosServer extends Node {
                 commands.remove();
                 ++begin;
             }
+        }
+
+        Slots startFrom(int begin) {
+            if (begin <= this.begin) {
+                return this;
+            }
+
+            Slots s = new Slots();
+            s.begin = begin;
+            s.commands = this.commands.stream()
+                    .skip(begin - this.begin)
+                    .collect(Collectors.toCollection(LinkedList::new));
+            return s;
         }
 
     }
