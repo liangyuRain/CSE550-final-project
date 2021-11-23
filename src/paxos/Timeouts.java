@@ -3,6 +3,8 @@ package paxos;
 import application.AMOCommand;
 import lombok.Data;
 
+import java.util.logging.Level;
+
 @Data
 final class ClientTimeout implements Timeout {
     private static final int CLIENT_RETRY_MILLIS = 1000;
@@ -12,6 +14,11 @@ final class ClientTimeout implements Timeout {
     @Override
     public int timeoutLengthMillis() {
         return CLIENT_RETRY_MILLIS;
+    }
+
+    @Override
+    public Level logLevel() {
+        return Level.FINEST;
     }
 }
 
@@ -23,6 +30,11 @@ final class PingTimeout implements Timeout {
     public int timeoutLengthMillis() {
         return PING_INTERVAL_MILLIS;
     }
+
+    @Override
+    public Level logLevel() {
+        return Level.FINEST;
+    }
 }
 
 @Data
@@ -33,6 +45,11 @@ final class PrepareRequestTimeout implements Timeout {
     public int timeoutLengthMillis() {
         return PREPARE_TIMEOUT;
     }
+
+    @Override
+    public Level logLevel() {
+        return Level.FINEST;
+    }
 }
 
 @Data
@@ -42,5 +59,10 @@ final class AcceptRequestTimeout implements Timeout {
     @Override
     public int timeoutLengthMillis() {
         return ACCEPT_TIMEOUT;
+    }
+
+    @Override
+    public Level logLevel() {
+        return Level.FINEST;
     }
 }

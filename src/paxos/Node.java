@@ -86,7 +86,7 @@ public class Node {
     }
 
     protected void send(Message message, Address to) {
-        log(Level.FINER, String.format("Send message %s to %s", message, to));
+        log(message.logLevel(), String.format("Send message %s to %s", message, to));
         executor.execute(new SendTask(message, to));
     }
 
@@ -95,7 +95,7 @@ public class Node {
     }
 
     protected void broadcast(Message message, Address[] to) {
-        log(Level.FINER, String.format("Broadcast %s", message));
+        log(message.logLevel(), String.format("Broadcast %s to %s", message, Arrays.toString(to)));
         for (Address addr : to) {
             send(message, addr);
         }
@@ -107,7 +107,7 @@ public class Node {
             timer = new Timer();
         }
         timer.schedule(new TimeoutTask(timeout, timer), timeout.timeoutLengthMillis());
-        log(Level.FINEST, String.format("Timeout %s set", timeout));
+        log(timeout.logLevel(), String.format("Timeout %s set", timeout));
     }
 
     private class TimeoutTask extends TimerTask {
@@ -122,7 +122,7 @@ public class Node {
 
         @Override
         public void run() {
-            log(Level.FINEST, String.format("Timeout %s triggered", timeout));
+            log(timeout.logLevel(), String.format("Timeout %s triggered", timeout));
             if (timer_thread_pool.size() < TIMER_THREAD_POOL_SIZE) {
                 timer_thread_pool.add(timer);
             }
@@ -172,7 +172,8 @@ public class Node {
                     }
                     socket.close();
                 } catch (IOException e) {
-                    log(Level.SEVERE, String.format("Send to %s failed with %s", to.hostname(), e.toString()));
+                    log(Level.SEVERE, String.format("Send %s to %s failed with %s",
+                            message, to.hostname(), e.toString()));
                 }
             }
         }
@@ -209,11 +210,11 @@ public class Node {
                     Package pkg = (Package) objInput.readObject();
                     Message message = pkg.message();
                     Address sender = pkg.sender();
-                    log(Level.FINER, String.format("Got message %s from %s", message, sender));
+                    log(message.logLevel(), String.format("Got message %s from %s", message, sender));
                     Node.this.handleMessage(message, sender);
                     objInput.close();
                 } catch (OptionalDataException e) { // Incomplete package?
-                    throw e;
+                    log(Level.SEVERE, String.format("Parse failed with %s", e.toString()));
                 } catch (ClassNotFoundException | IOException e) {
                     log(e);
                     System.exit(1);

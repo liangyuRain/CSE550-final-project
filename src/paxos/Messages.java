@@ -9,10 +9,18 @@ import lombok.NonNull;
 import org.apache.commons.lang3.tuple.*;
 
 import java.util.LinkedHashSet;
+import java.util.logging.Level;
 
 @Data
 class Ping implements Message {
+
     private final int nextToExecute;
+
+    @Override
+    public Level logLevel() {
+        return Level.FINEST;
+    }
+
 }
 
 @Data
@@ -20,6 +28,11 @@ class PrepareRequest implements Message {
 
     @NonNull
     private final Pair<Integer, Address> proposalNum;
+
+    @Override
+    public Level logLevel() {
+        return Level.FINER;
+    }
 
 }
 
@@ -35,6 +48,11 @@ class PrepareReply implements Message { // success iff proposalNum >= maxProposa
     @NonNull
     private final Pair<Integer, Address> maxProposalNum;
 
+    @Override
+    public Level logLevel() {
+        return Level.FINER;
+    }
+
 }
 
 @Data
@@ -48,6 +66,11 @@ class AcceptRequest implements Message {
     private final LinkedHashSet<AMOCommand> uncertain;
     private final int nextToExecute;
 
+    @Override
+    public Level logLevel() {
+        return Level.FINER;
+    }
+
 }
 
 @Data
@@ -58,5 +81,10 @@ class AcceptReply implements Message { // success iff acceptNum >= maxProposalNu
     @NonNull
     private final Pair<Integer, Address> maxProposalNum;
     private final int nextToExecute;
+
+    @Override
+    public Level logLevel() {
+        return Level.FINER;
+    }
 
 }
