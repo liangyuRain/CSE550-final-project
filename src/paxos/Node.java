@@ -80,7 +80,7 @@ public class Node {
         }
     }
 
-    protected void log(Exception e) {
+    protected void log(Throwable e) {
         StringWriter sw = new StringWriter();
         PrintWriter pw = new PrintWriter(sw);
         e.printStackTrace(pw);
@@ -101,9 +101,11 @@ public class Node {
     }
 
     protected void broadcast(Message message, Address[] to) {
-        log(message.logLevel(), String.format("Broadcast %s to %s", message, Arrays.toString(to)));
-        for (Address addr : to) {
-            send(message, addr);
+        if (to.length > 0) {
+            log(message.logLevel(), String.format("Broadcast %s to %s", message, Arrays.toString(to)));
+            for (Address addr : to) {
+                send(message, addr);
+            }
         }
     }
 
@@ -128,17 +130,25 @@ public class Node {
 
         @Override
         public void run() {
-            log(timeout.logLevel(), String.format("Timeout %s triggered", timeout));
-            if (timer_thread_pool.size() < TIMER_THREAD_POOL_SIZE) {
-                timer_thread_pool.add(timer);
-            }
-            Class<?> timeout_class = timeout.getClass();
             try {
-                Method method = Node.this.getClass().getDeclaredMethod(
-                        "on" + timeout_class.getSimpleName(), timeout_class);
-                method.setAccessible(true);
-                method.invoke(Node.this, timeout);
-            } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+                log(timeout.logLevel(), String.format("Timeout %s triggered", timeout));
+                if (timer_thread_pool.size() < TIMER_THREAD_POOL_SIZE) {
+                    timer_thread_pool.add(timer);
+                }
+                Class<?> timeout_class = timeout.getClass();
+                try {
+                    Method method = Node.this.getClass().getDeclaredMethod(
+                            "on" + timeout_class.getSimpleName(), timeout_class);
+                    method.setAccessible(true);
+                    method.invoke(Node.this, timeout);
+                } catch (NoSuchMethodException | IllegalAccessException e) {
+                    log(e);
+                    System.exit(1);
+                } catch (InvocationTargetException e) {
+                    log(e.getCause());
+                    System.exit(1);
+                }
+            } catch (Exception e) {
                 log(e);
                 System.exit(1);
             }
@@ -150,37 +160,41 @@ public class Node {
 
         public static final int CONNECTION_TIMEOUT = 3000;
 
-        private final Message message;
+        private final String str;
+        private final byte[] pkg;
         private final Address to;
 
         public SendTask(Message message, Address to) {
-            this.message = message;
+            ByteArrayOutputStream byteOutput = new ByteArrayOutputStream();
+            try {
+                ObjectOutputStream objOutput = new ObjectOutputStream(byteOutput);
+                objOutput.writeObject(new Package(Node.this.address, message));
+                objOutput.flush();
+                objOutput.close();
+            } catch (IOException e) {
+                log(e);
+                System.exit(1);
+            }
+            this.pkg = byteOutput.toByteArray();
+            this.str = message.toString();
             this.to = to;
         }
 
         @Override
         public void run() {
-            if (this.to.equals(Node.this.address)) {
-                Node.this.handleMessage(this.message, Node.this.address);
-            } else {
-                try {
-                    Socket socket = new Socket();
-                    socket.connect(to.inetSocketAddress(), CONNECTION_TIMEOUT);
-                    try {
-                        OutputStream sktOutput = socket.getOutputStream();
-                        ObjectOutputStream objOutput = new ObjectOutputStream(sktOutput);
-                        objOutput.writeObject(new Package(Node.this.address, message));
-                        objOutput.close();
-                        sktOutput.close();
-                    } catch (IOException e) {
-                        log(e);
-                        System.exit(1);
-                    }
-                    socket.close();
-                } catch (IOException e) {
-                    log(Level.SEVERE, String.format("Send %s to %s failed with %s",
-                            message, to.hostname(), e.toString()));
-                }
+            try {
+                Socket socket = new Socket();
+                socket.connect(to.inetSocketAddress(), CONNECTION_TIMEOUT);
+                OutputStream sktOutput = socket.getOutputStream();
+                sktOutput.write(this.pkg);
+                sktOutput.close();
+                socket.close();
+            } catch (IOException e) {
+                log(Level.SEVERE, String.format("Send %s to %s failed with %s",
+                        this.str, to.hostname(), e.toString()));
+            } catch (Exception e) {
+                log(e);
+                System.exit(1);
             }
         }
 
@@ -193,8 +207,11 @@ public class Node {
                     "handle" + messageClass.getSimpleName(), messageClass, Address.class);
             method.setAccessible(true);
             method.invoke(this, message, sender);
-        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+        } catch (NoSuchMethodException | IllegalAccessException e) {
             log(e);
+            System.exit(1);
+        } catch (InvocationTargetException e) {
+            log(e.getCause());
             System.exit(1);
         }
     }
@@ -210,24 +227,36 @@ public class Node {
         @Override
         public void run() {
             try {
-                InputStream sktinput = clientSocket.getInputStream();
+                InputStream sktinput = null;
                 try {
-                    ObjectInputStream objInput = new ObjectInputStream(sktinput);
-                    Package pkg = (Package) objInput.readObject();
-                    Message message = pkg.message();
-                    Address sender = pkg.sender();
-                    log(message.logLevel(), String.format("Got message %s from %s", message, sender));
-                    Node.this.handleMessage(message, sender);
-                    objInput.close();
-                } catch (OptionalDataException e) { // Incomplete package?
-                    log(Level.SEVERE, String.format("Parse failed with %s", e.toString()));
-                } catch (ClassNotFoundException | IOException e) {
-                    log(e);
-                    System.exit(1);
+                    sktinput = clientSocket.getInputStream();
+                } catch (IOException e) {
+                    log(Level.SEVERE, String.format("Receive failed with %s", e.toString()));
+                    return;
                 }
-                sktinput.close();
-            } catch (IOException e) {
-                log(Level.SEVERE, String.format("Receive failed with %s", e.toString()));
+                ObjectInputStream objInput = null;
+                Package pkg = null;
+                try {
+                    objInput = new ObjectInputStream(sktinput);
+                    pkg = (Package) objInput.readObject();
+                } catch (ClassNotFoundException | IOException e) {  // Incomplete package?
+                    log(Level.SEVERE, String.format("Parse failed with %s", e.toString()));
+                    return;
+                }
+                Message message = pkg.message();
+                Address sender = pkg.sender();
+                log(message.logLevel(), String.format("Got message %s from %s", message, sender));
+                Node.this.handleMessage(message, sender);
+                try {
+                    objInput.close();
+                    sktinput.close();
+                } catch (IOException e) {
+                    log(Level.SEVERE, String.format("Close failed with %s", e.toString()));
+                    return;
+                }
+            } catch (Exception e) {
+                log(e);
+                System.exit(1);
             }
         }
 
