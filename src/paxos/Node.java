@@ -36,7 +36,7 @@ public class Node {
         this.timer_thread_pool = new ConcurrentLinkedQueue<>();
         this.logLevel = Level.ALL;
 
-        FileHandler fh = new FileHandler("paxos_server.log");
+        FileHandler fh = new FileHandler(String.format("%s.log", this.getClass().getSimpleName()));
         fh.setFormatter(new SimpleFormatter());
         LOG.addHandler(fh);
     }
