@@ -183,7 +183,9 @@ public class PaxosServer extends Node {
                             executed.commands.addAll(uncertain);
                             for (AMOCommand c : uncertain) { // execute all commands in uncertain since majority replied
                                 AMOResult result = app.execute(c);
-                                send(new PaxosReply(leader, result), result.clientAddr()); // reply clients
+                                if (result != null) { // ancient command
+                                    send(new PaxosReply(leader, result), result.clientAddr()); // reply clients
+                                }
                             }
                             uncertain.clear();
                             leaderRole.newAccept();
