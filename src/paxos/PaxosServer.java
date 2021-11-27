@@ -375,7 +375,10 @@ public class PaxosServer extends Node {
                 set(prepareTimeout);
             }
             acceptorRole.maxPrepareNum = new ImmutablePair<>(proposalNum.left, proposalNum.right);
-            broadcast(new PrepareRequest(proposalNum), noPrepareReply);
+            broadcast(new PrepareRequest(proposalNum),
+                    noPrepareReply.stream()
+                            .filter(alive::containsKey)
+                            .collect(Collectors.toList()));
         }
 
         void sendAccept() {
