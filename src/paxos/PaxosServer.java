@@ -180,9 +180,11 @@ public class PaxosServer extends Node {
                 if (leaderRole.noAcceptReply.remove(sender)) {
                     if (m.maxProposalNum().compareTo(leaderRole.proposalNum) <= 0) {
                         if (leaderRole.noAcceptReply.size() < servers.length / 2.0) { // majority replied
-                            executed.commands.addAll(uncertain);
                             for (AMOCommand c : uncertain) { // execute all commands in uncertain since majority replied
                                 AMOResult result = app.execute(c);
+                                super.log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
+                                        this.executed.end(), c, result == null ? "null" : result));
+                                executed.commands.add(c);
                                 if (result != null) { // ancient command
                                     send(new PaxosReply(leader, result), result.clientAddr()); // reply clients
                                 }
@@ -475,7 +477,9 @@ public class PaxosServer extends Node {
             }
             while (iter.hasNext()) {
                 AMOCommand command = iter.next();
-                app.execute(command);
+                AMOResult result = app.execute(command);
+                super.log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
+                        this.executed.end(), command, result == null ? "null" : result));
                 executed.commands.add(command);
             }
             return true;

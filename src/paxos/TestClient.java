@@ -61,9 +61,13 @@ public class TestClient {
             Result res2 = app.execute(cmd);
 
             System.out.printf("Received result: %s, Expected result: %s%n", res, res2);
+            client.log(Level.INFO, String.format(
+                    "Received result: %s, Expected result: %s, Command: %s", res, res2, cmd));
 
             if (!res.equals(res2)) {
                 System.out.println("Result does not match");
+                client.log(Level.SEVERE, String.format("Result does not match: " +
+                        "Received result: %s, Expected result: %s, Command: %s", res, res2, cmd));
                 System.exit(1);
             }
 
