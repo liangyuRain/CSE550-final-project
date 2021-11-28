@@ -219,9 +219,8 @@ public class PaxosServer extends Node {
         received(sender);
         garbageCollect(m.nextToExecute(), sender);
         if (!leader.equals(sender)) return;
-        Pair<Integer, Address> proposalNum = Pair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
-        if (proposalNum.compareTo(acceptorRole.maxPrepareNum) >= 0) { // accept the request and sync with leader state
-            acceptorRole.maxPrepareNum = proposalNum;
+        if (m.acceptNum().compareTo(acceptorRole.maxAcceptNum) >= 0) { // accept the request and sync with leader state
+            acceptorRole.maxPrepareNum = Pair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
             acceptorRole.maxAcceptNum = m.acceptNum();
             execute(m.executed().commands, m.executed().begin);
             uncertain = m.uncertain().stream()
