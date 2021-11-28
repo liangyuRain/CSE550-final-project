@@ -23,6 +23,9 @@ public class Node {
                 "[%1$tF %1$tT %1$tL] %5$s %n");
     }
 
+    private static final int LOG_FILE_SIZE_LIMIT = Integer.MAX_VALUE;
+    private static final int LOG_FILE_COUNT = 1;
+
     private final Address address;
 
     private static final int TIMER_THREAD_POOL_SIZE = 8;
@@ -36,7 +39,8 @@ public class Node {
         this.timer_thread_pool = new ConcurrentLinkedQueue<>();
         this.logLevel = Level.ALL;
 
-        FileHandler fh = new FileHandler(String.format("%s.log", this.getClass().getSimpleName()));
+        FileHandler fh = new FileHandler(String.format("%s.log", this.getClass().getSimpleName()),
+                LOG_FILE_SIZE_LIMIT, LOG_FILE_COUNT);
         fh.setFormatter(new SimpleFormatter());
         LOG.addHandler(fh);
     }
