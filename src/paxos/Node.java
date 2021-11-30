@@ -28,15 +28,12 @@ public class Node {
 
     private final Address address;
 
-    private static final int TIMER_THREAD_POOL_SIZE = 8;
-    private final Queue<Timer> timer_thread_pool;
-    private ThreadPoolExecutor executor;
+    private ScheduledThreadPoolExecutor executor;
 
     private Level logLevel;
 
     public Node(Address address) throws IOException {
         this.address = address;
-        this.timer_thread_pool = new ConcurrentLinkedQueue<>();
         this.logLevel = Level.ALL;
 
         FileHandler fh = new FileHandler(String.format("%s.log", this.getClass().getSimpleName()),
@@ -47,10 +44,7 @@ public class Node {
 
     // let child call init first
     void init() {
-        for (int i = 0; i < TIMER_THREAD_POOL_SIZE; ++i) {
-            timer_thread_pool.add(new Timer());
-        }
-        this.executor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
+        this.executor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(50);
     }
 
     void listen() {
@@ -114,31 +108,22 @@ public class Node {
     }
 
     protected void set(Timeout timeout) {
-        Timer timer = this.timer_thread_pool.poll();
-        if (timer == null) {
-            timer = new Timer();
-        }
-        timer.schedule(new TimeoutTask(timeout, timer), timeout.timeoutLengthMillis());
+        executor.schedule(new TimeoutTask(timeout), timeout.timeoutLengthMillis(), TimeUnit.MILLISECONDS);
         log(timeout.logLevel(), String.format("Timeout %s set", timeout));
     }
 
     private class TimeoutTask extends TimerTask {
 
         private final Timeout timeout;
-        private final Timer timer;
 
-        public TimeoutTask(Timeout timeout, Timer timer) {
+        public TimeoutTask(Timeout timeout) {
             this.timeout = timeout;
-            this.timer = timer;
         }
 
         @Override
         public void run() {
             try {
                 log(timeout.logLevel(), String.format("Timeout %s triggered", timeout));
-                if (timer_thread_pool.size() < TIMER_THREAD_POOL_SIZE) {
-                    timer_thread_pool.add(timer);
-                }
                 Class<?> timeout_class = timeout.getClass();
                 try {
                     Method method = Node.this.getClass().getDeclaredMethod(
