@@ -5,12 +5,13 @@ import lombok.extern.java.Log;
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.SimpleFormatter;
@@ -32,9 +33,12 @@ public class Node {
 
     private Level logLevel;
 
+    private final ConcurrentHashMap<Address, ConnectionPool> addrToConn;
+
     public Node(Address address) throws IOException {
         this.address = address;
         this.logLevel = Level.ALL;
+        this.addrToConn = new ConcurrentHashMap<>();
 
         FileHandler fh = new FileHandler(String.format("%s.log", this.getClass().getSimpleName()),
                 LOG_FILE_SIZE_LIMIT, LOG_FILE_COUNT);
@@ -53,9 +57,14 @@ public class Node {
             for (; ; ) {
                 try {
                     Socket clientSocket = serverSkt.accept();
-                    executor.execute(new ReceiveTask(clientSocket));
+                    String clientHostname = ((InetSocketAddress) clientSocket.getRemoteSocketAddress()).getHostName();
+                    Address clientAddr = new Address(clientHostname);
+                    log(Level.FINEST, String.format("Accepted connection from %s", clientAddr.hostname()));
+                    executor.execute(() -> addrToConn
+                            .computeIfAbsent(clientAddr, ConnectionPool::new)
+                            .addConnection(clientSocket));
                 } catch (IOException e) {
-                    log(Level.SEVERE, String.format("Listen failed with %s", e.toString()));
+                    log(Level.SEVERE, String.format("Listening failed with %s", e));
                 }
             }
         } catch (IOException e) {
@@ -78,20 +87,24 @@ public class Node {
         }
     }
 
-    protected void log(Throwable e) {
+    protected void log(Throwable e, String prefix) {
         StringWriter sw = new StringWriter();
         PrintWriter pw = new PrintWriter(sw);
+        sw.write(prefix);
         e.printStackTrace(pw);
         pw.write(' ');
         pw.write(e.toString());
         pw.flush();
-        log(Level.SEVERE, sw.toString());
+        this.log(Level.SEVERE, sw.toString());
         pw.close();
     }
 
+    protected void log(Throwable e) {
+        this.log(e, "");
+    }
+
     protected void send(Message message, Address to) {
-        log(message.logLevel(), String.format("Send message %s to %s", message, to));
-        executor.execute(new SendTask(message, to));
+        addrToConn.computeIfAbsent(to, ConnectionPool::new).send(message);
     }
 
     protected void broadcast(Message message, Collection<Address> to) {
@@ -145,108 +158,309 @@ public class Node {
 
     }
 
-    private class SendTask implements Runnable {
+    private class ConnectionPool {
 
         public static final int CONNECTION_TIMEOUT = 3000;
+        public static final int MESSAGE_QUEUE_CAPACITY = 16;
+        public static final int MAX_NUM_OF_CONNECTIONS = 10;
 
-        private final String str;
-        private final byte[] pkg;
+        private final BlockingQueue<byte[]> outboundPackages;
         private final Address to;
 
-        public SendTask(Message message, Address to) {
-            ByteArrayOutputStream byteOutput = new ByteArrayOutputStream();
+        private final AtomicLong counter;
+        private final ConcurrentHashMap<Long, Socket> connections;
+
+        public ConnectionPool(Address to) {
+            this.outboundPackages = new ArrayBlockingQueue<>(MESSAGE_QUEUE_CAPACITY);
+            this.to = to;
+            this.connections = new ConcurrentHashMap<>();
+            this.counter = new AtomicLong(0);
+
+            if (!to.equals(Node.this.address())) {
+                executor.execute(new ConnectionCreationTask());
+            }
+        }
+
+        private class ConnectionCreationTask implements Runnable {
+
+            @Override
+            public void run() {
+                try {
+                    for (; ; ) {
+                        synchronized (connections) {
+                            while ((!connections.isEmpty() && outboundPackages.remainingCapacity() > 0) ||
+                                    connections.size() >= MAX_NUM_OF_CONNECTIONS) {
+                                try {
+                                    connections.wait();
+                                } catch (InterruptedException e) {
+                                    log(e);
+                                    System.exit(1);
+                                }
+                            }
+                        }
+
+                        try {
+                            Socket skt = new Socket();
+                            skt.connect(to.inetSocketAddress(), CONNECTION_TIMEOUT);
+                            long id = addConnectionInternal(skt);
+                            if (id >= 0) {
+                                log(Level.FINER, String.format("Created connection %s to %s", id, to.hostname()));
+                            }
+                        } catch (SocketTimeoutException e) {
+                            log(Level.SEVERE, String.format("Create connection to %s timed out", to.hostname()));
+                        } catch (IOException e) {
+                            log(Level.SEVERE, String.format("Create connection to %s failed with %s", to.hostname(), e));
+                            Thread.sleep(CONNECTION_TIMEOUT);
+                        }
+                    }
+                } catch (Exception e) {
+                    log(e);
+                    System.exit(1);
+                }
+            }
+
+        }
+
+        public void addConnection(Socket skt) {
             try {
+                long id = addConnectionInternal(skt);
+                if (id >= 0) {
+                    log(Level.FINER, String.format("Added connection %d from %s", id, to.hostname()));
+                }
+            } catch (Exception e) {
+                log(e);
+                System.exit(1);
+            }
+        }
+
+        private long addConnectionInternal(Socket skt) {
+            if (to.equals(Node.this.address())) {
+                throw new IllegalStateException("Cannot add connection to self");
+            }
+            long id;
+            synchronized (connections) {
+                if (connections.size() >= MAX_NUM_OF_CONNECTIONS) {
+                    log(Level.SEVERE, "Add connection failed due to too many connections");
+                    return -1;
+                }
+                id = counter.getAndIncrement();
+                connections.put(id, skt);
+            }
+            executor.execute(new SendTask(id));
+            executor.execute(new ReceiveTask(id));
+            log(Level.FINER, String.format("Active connection to %s: %d", to.hostname(), connections.size()));
+            return id;
+        }
+
+        public void closeConnection(long id) {
+            Socket skt = connections.get(id);
+            if (skt != null) {
+                try {
+                    skt.close();
+                } catch (IOException e) {
+                    log(Level.SEVERE, String.format("Close connection %d to %s failed with %s", id, to, e));
+                }
+                synchronized (connections) {
+                    connections.remove(id);
+                    if (connections.isEmpty()) {
+                        connections.notifyAll();
+                    }
+                }
+            }
+        }
+
+        protected void log(Level level, String s) {
+            Node.this.log(level, String.format("[ConnectionPool %s] %s", to.hostname(), s));
+        }
+
+        protected void log(Throwable e, String prefix) {
+            Node.this.log(e, String.format("[ConnectionPool %s] %s", to.hostname(), prefix));
+        }
+
+        protected void log(Throwable e) {
+            this.log(e, "");
+        }
+
+        public void send(Message message) {
+            try {
+                ByteArrayOutputStream byteOutput = new ByteArrayOutputStream();
                 ObjectOutputStream objOutput = new ObjectOutputStream(byteOutput);
+
                 objOutput.writeObject(new Package(Node.this.address, message));
                 objOutput.flush();
                 objOutput.close();
-            } catch (IOException e) {
-                log(e);
-                System.exit(1);
-            }
-            this.pkg = byteOutput.toByteArray();
-            this.str = message.toString();
-            this.to = to;
-        }
-
-        @Override
-        public void run() {
-            try {
-                Socket socket = new Socket();
-                socket.connect(to.inetSocketAddress(), CONNECTION_TIMEOUT);
-                OutputStream sktOutput = socket.getOutputStream();
-                sktOutput.write(this.pkg);
-                sktOutput.close();
-                socket.close();
-            } catch (IOException e) {
-                log(Level.SEVERE, String.format("Send %s to %s failed with %s",
-                        this.str, to.hostname(), e.toString()));
-            } catch (Exception e) {
-                log(e);
-                System.exit(1);
-            }
-        }
-
-    }
-
-    private void handleMessage(Message message, Address sender) {
-        Class<?> messageClass = message.getClass();
-        try {
-            Method method = this.getClass().getDeclaredMethod(
-                    "handle" + messageClass.getSimpleName(), messageClass, Address.class);
-            method.setAccessible(true);
-            method.invoke(this, message, sender);
-        } catch (NoSuchMethodException | IllegalAccessException e) {
-            log(e);
-            System.exit(1);
-        } catch (InvocationTargetException e) {
-            log(e.getCause());
-            System.exit(1);
-        }
-    }
-
-    private class ReceiveTask implements Runnable {
-
-        private final Socket clientSocket;
-
-        public ReceiveTask(Socket clientSocket) {
-            this.clientSocket = clientSocket;
-        }
-
-        @Override
-        public void run() {
-            try {
-                InputStream sktinput = null;
-                try {
-                    sktinput = clientSocket.getInputStream();
-                } catch (IOException e) {
-                    log(Level.SEVERE, String.format("Receive failed with %s", e.toString()));
-                    return;
-                }
-                ObjectInputStream objInput = null;
-                Package pkg = null;
-                try {
-                    objInput = new ObjectInputStream(sktinput);
-                    pkg = (Package) objInput.readObject();
-                } catch (ClassNotFoundException | IOException e) {  // Incomplete package?
-                    log(Level.SEVERE, String.format("Parse failed with %s", e.toString()));
-                    return;
-                }
-                Message message = pkg.message();
-                Address sender = pkg.sender();
-                log(message.logLevel(), String.format("Got message %s from %s", message, sender));
-                Node.this.handleMessage(message, sender);
-                try {
-                    objInput.close();
-                    sktinput.close();
-                } catch (IOException e) {
-                    log(Level.SEVERE, String.format("Close failed with %s", e.toString()));
-                    return;
+                byte[] bytes = byteOutput.toByteArray();
+                if (to.equals(Node.this.address())) {
+                    Message copy = deserialize(bytes).message();
+                    executor.execute(() -> handleMessage(copy, Node.this.address()));
+                } else {
+                    if (!outboundPackages.offer(bytes)) {
+                        log(Level.SEVERE, String.format(
+                                "Message ignored because of full outbound package queue: %s", message));
+                        synchronized (connections) {
+                            connections.notifyAll();
+                        }
+                    }
                 }
             } catch (Exception e) {
                 log(e);
                 System.exit(1);
             }
+        }
+
+        private void handleMessage(Message message, Address sender) {
+            Class<?> messageClass = message.getClass();
+            try {
+                Method method = Node.this.getClass().getDeclaredMethod(
+                        "handle" + messageClass.getSimpleName(), messageClass, Address.class);
+                method.setAccessible(true);
+                method.invoke(Node.this, message, sender);
+            } catch (NoSuchMethodException | IllegalAccessException e) {
+                log(e);
+                System.exit(1);
+            } catch (InvocationTargetException e) {
+                log(e.getCause());
+                System.exit(1);
+            }
+        }
+
+        private Package deserialize(byte[] bytes) throws IOException, ClassNotFoundException {
+            ObjectInputStream objInput = new ObjectInputStream(new ByteArrayInputStream(bytes));
+            Package pkg = (Package) objInput.readObject();
+            objInput.close();
+            return pkg;
+        }
+
+        private class SendTask implements Runnable {
+
+            private final long id;
+
+            public SendTask(long id) {
+                this.id = id;
+            }
+
+            protected void log(Level level, String s) {
+                ConnectionPool.this.log(level, String.format("[Connection %d] %s", id, s));
+            }
+
+            protected void log(Throwable e, String prefix) {
+                ConnectionPool.this.log(e, String.format("[Connection %d] %s", id, prefix));
+            }
+
+            protected void log(Throwable e) {
+                this.log(e, "");
+            }
+
+            @Override
+            public void run() {
+                try {
+                    Socket skt = connections.get(id);
+                    if (skt == null) return;
+                    ObjectOutputStream sktOutput;
+                    try {
+                        sktOutput = new ObjectOutputStream(skt.getOutputStream());
+                    } catch (IOException e) {
+                        log(Level.SEVERE, String.format("Constructing ObjectOutputStream failed with %s", e));
+                        closeConnection(id);
+                        return;
+                    }
+                    for (; ; ) {
+                        synchronized (connections) {
+                            if (connections.size() > MAX_NUM_OF_CONNECTIONS) {
+                                log(Level.SEVERE, "Closing socket due to too many connections");
+                                closeConnection(id);
+                                return;
+                            }
+                        }
+
+                        byte[] bytes = outboundPackages.take();
+                        Package pkg = deserialize(bytes);
+                        try {
+                            sktOutput.writeObject(pkg);
+                            sktOutput.flush();
+                            log(pkg.message().logLevel(), String.format("Sent message %s", pkg.message()));
+                        } catch (IOException e) {
+                            log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg.message()));
+                            try {
+                                sktOutput.close();
+                            } catch (IOException ignored) {
+                            }
+                            closeConnection(id);
+                            return;
+                        }
+                    }
+                } catch (Exception e) {
+                    log(e);
+                    System.exit(1);
+                }
+            }
+        }
+
+        private class ReceiveTask implements Runnable {
+
+            private final long id;
+
+            public ReceiveTask(long id) {
+                this.id = id;
+            }
+
+            protected void log(Level level, String s) {
+                ConnectionPool.this.log(level, String.format("[Connection %d] %s", id, s));
+            }
+
+            protected void log(Throwable e, String prefix) {
+                ConnectionPool.this.log(e, String.format("[Connection %d] %s", id, prefix));
+            }
+
+            protected void log(Throwable e) {
+                this.log(e, "");
+            }
+
+            @Override
+            public void run() {
+                try {
+                    Socket skt = connections.get(id);
+                    if (skt == null) return;
+                    ObjectInputStream sktInput;
+                    try {
+                        sktInput = new ObjectInputStream(skt.getInputStream());
+                    } catch (IOException e) {
+                        log(Level.SEVERE, String.format("Constructing ObjectInputStream failed with %s", e));
+                        closeConnection(id);
+                        return;
+                    }
+                    for (; ; ) {
+                        synchronized (connections) {
+                            if (connections.size() > MAX_NUM_OF_CONNECTIONS) {
+                                log(Level.SEVERE, "Closing socket due to too many connections");
+                                closeConnection(id);
+                                return;
+                            }
+                        }
+
+                        Package pkg;
+                        try {
+                            pkg = (Package) sktInput.readObject();
+                        } catch (ClassNotFoundException | IOException e) {  // Incomplete package?
+                            log(Level.SEVERE, String.format("Receive failed with %s", e));
+                            try {
+                                sktInput.close();
+                            } catch (IOException ignored) {
+                            }
+                            closeConnection(id);
+                            return;
+                        }
+                        Message message = pkg.message();
+                        Address sender = pkg.sender();
+                        log(message.logLevel(), String.format("Got message from %s: %s ", sender.hostname(), message));
+                        executor.execute(() -> handleMessage(message, sender));
+                    }
+                } catch (Exception e) {
+                    log(e);
+                    System.exit(1);
+                }
+            }
+
         }
 
     }
