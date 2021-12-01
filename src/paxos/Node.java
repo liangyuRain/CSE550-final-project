@@ -1,6 +1,7 @@
 package paxos;
 
 import lombok.extern.java.Log;
+import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
@@ -29,7 +30,8 @@ public class Node {
 
     private final Address address;
 
-    private ScheduledThreadPoolExecutor executor;
+    private final ScheduledThreadPoolExecutor scheduledExecutor;
+    private final ThreadPoolExecutor dynamicExecutor;
 
     private Level logLevel;
 
@@ -44,11 +46,32 @@ public class Node {
                 LOG_FILE_SIZE_LIMIT, LOG_FILE_COUNT);
         fh.setFormatter(new SimpleFormatter());
         LOG.addHandler(fh);
+
+        this.scheduledExecutor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(10);
+        this.dynamicExecutor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
+        this.scheduledExecutor.scheduleWithFixedDelay(
+                () -> log(Level.FINEST, String.format(
+                        "ScheduledThreadPoolExecutor info: " +
+                                "Queue size: %d, Num of active thread: %d, Pool size: %d, Core pool size: %d",
+                        scheduledExecutor.getQueue().size(),
+                        scheduledExecutor.getActiveCount(),
+                        scheduledExecutor.getPoolSize(),
+                        scheduledExecutor.getCorePoolSize())),
+                0, 10, TimeUnit.SECONDS
+        );
+        this.scheduledExecutor.scheduleWithFixedDelay(
+                () -> log(Level.FINEST, String.format(
+                        "ThreadPoolExecutor info: " +
+                                "Queue size: %d, Num of active thread: %d, Pool size: %d, Core pool size: %d",
+                        dynamicExecutor.getQueue().size(),
+                        dynamicExecutor.getActiveCount(),
+                        dynamicExecutor.getPoolSize(),
+                        dynamicExecutor.getCorePoolSize())),
+                0, 10, TimeUnit.SECONDS
+        );
     }
 
-    // let child call init first
     void init() {
-        this.executor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(50);
     }
 
     void listen() {
@@ -59,8 +82,9 @@ public class Node {
                     Socket clientSocket = serverSkt.accept();
                     String clientHostname = ((InetSocketAddress) clientSocket.getRemoteSocketAddress()).getHostName();
                     Address clientAddr = new Address(clientHostname);
-                    log(Level.FINEST, String.format("Accepted connection from %s", clientAddr.hostname()));
-                    executor.execute(() -> addrToConn
+                    log(Level.FINEST, String.format(
+                            "Accepted connection from %s: %s", clientAddr.hostname(), clientSocket));
+                    dynamicExecutor.execute(() -> addrToConn
                             .computeIfAbsent(clientAddr, ConnectionPool::new)
                             .addConnection(clientSocket));
                 } catch (IOException e) {
@@ -83,7 +107,7 @@ public class Node {
 
     protected void log(Level level, String s) {
         if (level.intValue() >= this.logLevel.intValue()) {
-            LOG.info(String.format("[Server %s] %s", address().hostname(), s));
+            LOG.info(String.format("[Node %s] %s", address().hostname(), s));
         }
     }
 
@@ -121,11 +145,22 @@ public class Node {
     }
 
     protected void set(Timeout timeout) {
-        executor.schedule(new TimeoutTask(timeout), timeout.timeoutLengthMillis(), TimeUnit.MILLISECONDS);
+        schedule(new TimeoutTask(timeout), timeout.timeoutLengthMillis());
         log(timeout.logLevel(), String.format("Timeout %s set", timeout));
     }
 
-    private class TimeoutTask extends TimerTask {
+    private void schedule(Runnable command, long delay) {
+        scheduledExecutor.schedule(() -> {
+            try {
+                dynamicExecutor.execute(command);
+            } catch (Throwable e) {
+                log(e);
+                System.exit(1);
+            }
+        }, delay, TimeUnit.MILLISECONDS);
+    }
+
+    private class TimeoutTask implements Runnable {
 
         private final Timeout timeout;
 
@@ -143,14 +178,10 @@ public class Node {
                             "on" + timeout_class.getSimpleName(), timeout_class);
                     method.setAccessible(true);
                     method.invoke(Node.this, timeout);
-                } catch (NoSuchMethodException | IllegalAccessException e) {
-                    log(e);
-                    System.exit(1);
                 } catch (InvocationTargetException e) {
-                    log(e.getCause());
-                    System.exit(1);
+                    throw e.getCause();
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 log(e);
                 System.exit(1);
             }
@@ -164,7 +195,7 @@ public class Node {
         public static final int MESSAGE_QUEUE_CAPACITY = 16;
         public static final int MAX_NUM_OF_CONNECTIONS = 10;
 
-        private final BlockingQueue<byte[]> outboundPackages;
+        private final BlockingQueue<Pair<byte[], Long>> outboundPackages;
         private final Address to;
 
         private final AtomicLong counter;
@@ -177,7 +208,7 @@ public class Node {
             this.counter = new AtomicLong(0);
 
             if (!to.equals(Node.this.address())) {
-                executor.execute(new ConnectionCreationTask());
+                dynamicExecutor.execute(new ConnectionCreationTask());
             }
         }
 
@@ -188,18 +219,29 @@ public class Node {
                 try {
                     for (; ; ) {
                         synchronized (connections) {
-                            while ((!connections.isEmpty() && outboundPackages.remainingCapacity() > 0) ||
-                                    connections.size() >= MAX_NUM_OF_CONNECTIONS) {
-                                try {
+                            for (; ; ) {
+                                int capacityRemain = outboundPackages.remainingCapacity();
+                                int numOfConnection = connections.size();
+
+                                if ((numOfConnection > 0 && capacityRemain > 0) ||
+                                        numOfConnection >= MAX_NUM_OF_CONNECTIONS) {
+                                    log(Level.FINEST, String.format(
+                                            "Connection creation enters sleep, " +
+                                                    "num of connections: %d, " +
+                                                    "queue capacity remain: %d", numOfConnection, capacityRemain));
                                     connections.wait();
-                                } catch (InterruptedException e) {
-                                    log(e);
-                                    System.exit(1);
+                                } else {
+                                    log(Level.FINEST, String.format(
+                                            "Connection creation awake, " +
+                                                    "num of connections: %d, " +
+                                                    "queue capacity remain: %d", numOfConnection, capacityRemain));
+                                    break;
                                 }
                             }
                         }
 
                         try {
+                            log(Level.FINEST, "Creating connection");
                             Socket skt = new Socket();
                             skt.connect(to.inetSocketAddress(), CONNECTION_TIMEOUT);
                             long id = addConnectionInternal(skt);
@@ -213,7 +255,7 @@ public class Node {
                             Thread.sleep(CONNECTION_TIMEOUT);
                         }
                     }
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     log(e);
                     System.exit(1);
                 }
@@ -227,13 +269,14 @@ public class Node {
                 if (id >= 0) {
                     log(Level.FINER, String.format("Added connection %d from %s", id, to.hostname()));
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 log(e);
                 System.exit(1);
             }
         }
 
         private long addConnectionInternal(Socket skt) {
+            log(Level.FINEST, String.format("Adding connection %s", skt));
             if (to.equals(Node.this.address())) {
                 throw new IllegalStateException("Cannot add connection to self");
             }
@@ -246,13 +289,24 @@ public class Node {
                 id = counter.getAndIncrement();
                 connections.put(id, skt);
             }
-            executor.execute(new SendTask(id));
-            executor.execute(new ReceiveTask(id));
-            log(Level.FINER, String.format("Active connection to %s: %d", to.hostname(), connections.size()));
+            dynamicExecutor.execute(new SendTask(id));
+            dynamicExecutor.execute(new ReceiveTask(id));
+            schedule(() -> {
+                try {
+                    closeConnection(id);
+                } catch (Throwable e) {
+                    log(e);
+                    System.exit(1);
+                }
+            }, 60 * 1000);
+            log(Level.FINER, String.format(
+                    "%s added as connection %d; Active connection to %s: %d",
+                    skt, id, to.hostname(), connections.size()));
             return id;
         }
 
         public void closeConnection(long id) {
+            log(Level.FINEST, String.format("Closing connection %d", id));
             Socket skt = connections.get(id);
             if (skt != null) {
                 try {
@@ -262,10 +316,13 @@ public class Node {
                 }
                 synchronized (connections) {
                     connections.remove(id);
+                    log(Level.FINER, String.format("Connection %d closed", id));
                     if (connections.isEmpty()) {
                         connections.notifyAll();
                     }
                 }
+            } else {
+                log(Level.FINEST, String.format("Connection %d already closed", id));
             }
         }
 
@@ -282,6 +339,7 @@ public class Node {
         }
 
         public void send(Message message) {
+            log(Level.FINEST, String.format("Enqueuing message %s", message));
             try {
                 ByteArrayOutputStream byteOutput = new ByteArrayOutputStream();
                 ObjectOutputStream objOutput = new ObjectOutputStream(byteOutput);
@@ -292,34 +350,38 @@ public class Node {
                 byte[] bytes = byteOutput.toByteArray();
                 if (to.equals(Node.this.address())) {
                     Message copy = deserialize(bytes).message();
-                    executor.execute(() -> handleMessage(copy, Node.this.address()));
+                    dynamicExecutor.execute(() -> handleMessage(copy, Node.this.address()));
                 } else {
-                    if (!outboundPackages.offer(bytes)) {
+                    if (!outboundPackages.offer(Pair.of(bytes, System.nanoTime()))) {
                         log(Level.SEVERE, String.format(
                                 "Message ignored because of full outbound package queue: %s", message));
                         synchronized (connections) {
                             connections.notifyAll();
                         }
+                    } else {
+                        log(Level.FINEST, String.format(
+                                "Enqueued message %s; Queue size: %d", message, outboundPackages.size()));
                     }
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 log(e);
                 System.exit(1);
             }
         }
 
         private void handleMessage(Message message, Address sender) {
-            Class<?> messageClass = message.getClass();
             try {
-                Method method = Node.this.getClass().getDeclaredMethod(
-                        "handle" + messageClass.getSimpleName(), messageClass, Address.class);
-                method.setAccessible(true);
-                method.invoke(Node.this, message, sender);
-            } catch (NoSuchMethodException | IllegalAccessException e) {
+                Class<?> messageClass = message.getClass();
+                try {
+                    Method method = Node.this.getClass().getDeclaredMethod(
+                            "handle" + messageClass.getSimpleName(), messageClass, Address.class);
+                    method.setAccessible(true);
+                    method.invoke(Node.this, message, sender);
+                } catch (InvocationTargetException e) {
+                    throw e.getCause();
+                }
+            } catch (Throwable e) {
                 log(e);
-                System.exit(1);
-            } catch (InvocationTargetException e) {
-                log(e.getCause());
                 System.exit(1);
             }
         }
@@ -365,22 +427,21 @@ public class Node {
                         return;
                     }
                     for (; ; ) {
-                        synchronized (connections) {
-                            if (connections.size() > MAX_NUM_OF_CONNECTIONS) {
-                                log(Level.SEVERE, "Closing socket due to too many connections");
-                                closeConnection(id);
-                                return;
-                            }
-                        }
-
-                        byte[] bytes = outboundPackages.take();
+                        log(Level.FINEST, "Waiting for new package");
+                        Pair<byte[], Long> item = outboundPackages.take();
+                        long dequeueTimestamp = System.nanoTime();
+                        byte[] bytes = item.getLeft();
+                        long enqueueTimestamp = item.getRight();
                         Package pkg = deserialize(bytes);
+                        log(Level.FINEST, String.format(
+                                "Message dequeued; Queue size: %d; Queue delay: %.3f us; Dequeued message: %s",
+                                outboundPackages.size(), (dequeueTimestamp - enqueueTimestamp) / 1.0e3, pkg.message()));
                         try {
                             sktOutput.writeObject(pkg);
-                            sktOutput.flush();
                             log(pkg.message().logLevel(), String.format("Sent message %s", pkg.message()));
                         } catch (IOException e) {
                             log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg.message()));
+                            send(pkg.message());
                             try {
                                 sktOutput.close();
                             } catch (IOException ignored) {
@@ -389,7 +450,7 @@ public class Node {
                             return;
                         }
                     }
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     log(e);
                     System.exit(1);
                 }
@@ -430,14 +491,6 @@ public class Node {
                         return;
                     }
                     for (; ; ) {
-                        synchronized (connections) {
-                            if (connections.size() > MAX_NUM_OF_CONNECTIONS) {
-                                log(Level.SEVERE, "Closing socket due to too many connections");
-                                closeConnection(id);
-                                return;
-                            }
-                        }
-
                         Package pkg;
                         try {
                             pkg = (Package) sktInput.readObject();
@@ -453,9 +506,9 @@ public class Node {
                         Message message = pkg.message();
                         Address sender = pkg.sender();
                         log(message.logLevel(), String.format("Got message from %s: %s ", sender.hostname(), message));
-                        executor.execute(() -> handleMessage(message, sender));
+                        dynamicExecutor.execute(() -> handleMessage(message, sender));
                     }
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     log(e);
                     System.exit(1);
                 }
