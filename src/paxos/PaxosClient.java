@@ -3,12 +3,8 @@ package paxos;
 import application.*;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
-import org.apache.commons.lang3.NotImplementedException;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.net.SocketException;
-import java.net.UnknownHostException;
 import java.util.Random;
 import java.util.Scanner;
 import java.util.StringTokenizer;
@@ -101,12 +97,7 @@ public final class PaxosClient extends Node implements Client {
         PaxosClient client = new PaxosClient(localAddr, addrs);
         client.setLogLevel(Level.OFF);
         client.init();
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                client.listen();
-            }
-        }).start();
+        new Thread(client::listen).start();
 
         Scanner console = new Scanner(System.in);
         for (; ; ) {
