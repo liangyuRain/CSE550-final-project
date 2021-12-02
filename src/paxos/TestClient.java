@@ -39,9 +39,6 @@ public class TestClient {
 
         Queue<Long> timestamps = new ArrayDeque<>();
         for (; ; ) {
-            long startTime = System.nanoTime();
-            timestamps.add(startTime);
-
             long locknum = signature * (1 + r.nextInt(TEST_KEY_NUM));
             LockCommand.Operation opt = r.nextBoolean() ? LockCommand.Operation.LOCK : LockCommand.Operation.UNLOCK;
 
@@ -49,21 +46,26 @@ public class TestClient {
 
             System.out.printf("Sending command: %s%n", cmd);
 
+            long startTime = System.nanoTime();
+            timestamps.add(startTime);
+
             client.sendCommand(cmd);
             Result res = client.getResult();
-            Result res2 = app.execute(cmd);
 
             long endTime = System.nanoTime();
+            long timeCost = endTime - startTime;
             while (!timestamps.isEmpty() && timestamps.peek() < endTime - 1e9) {
                 timestamps.remove();
             }
             double throughput = timestamps.isEmpty() ?
-                    1 / ((endTime - startTime) / 1.0e9) : timestamps.size() / ((endTime - timestamps.peek()) / 1.0e9);
-
-            System.out.printf("Received result: %s, Expected result: %s%n", res, res2);
+                    1 / (timeCost / 1.0e9) : timestamps.size() / ((endTime - timestamps.peek()) / 1.0e9);
+            Result res2 = app.execute(cmd);
+            System.out.printf("Received result: %s, Expected result: %s, Time cost: %.3f ms%n",
+                    res, res2, timeCost / 1.0e6);
             client.log(Level.INFO, String.format(
-                    "Received result: %s, Expected result: %s, Test throughput: %.3f per second, Command: %s",
-                    res, res2, throughput, cmd));
+                    "Received result: %s, Expected result: %s, Time cost: %.3f ms, " +
+                            "Test throughput: %.3f per second, Command: %s",
+                    res, res2, timeCost / 1.0e6, throughput, cmd));
 
             if (!res.equals(res2)) {
                 System.out.println("Result does not match");
