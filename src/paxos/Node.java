@@ -223,7 +223,7 @@ public class Node {
                                 int capacityRemain = outboundPackages.remainingCapacity();
                                 int numOfConnection = connections.size();
 
-                                if ((numOfConnection > 0 && capacityRemain > 0) ||
+                                if ((numOfConnection >= 2 && capacityRemain > 0) ||
                                         numOfConnection >= MAX_NUM_OF_CONNECTIONS) {
                                     log(Level.FINEST, String.format(
                                             "Connection creation enters sleep, " +
@@ -291,15 +291,7 @@ public class Node {
             }
             dynamicExecutor.execute(new SendTask(id));
             dynamicExecutor.execute(new ReceiveTask(id));
-            schedule(() -> {
-                try {
-                    closeConnection(id);
-                } catch (Throwable e) {
-                    log(e);
-                    System.exit(1);
-                }
-            }, 60 * 1000);
-            log(Level.FINER, String.format(
+            log(Level.FINEST, String.format(
                     "%s added as connection %d; Active connection to %s: %d",
                     skt, id, to.hostname(), connections.size()));
             return id;
@@ -314,12 +306,10 @@ public class Node {
                 } catch (IOException e) {
                     log(Level.SEVERE, String.format("Close connection %d to %s failed with %s", id, to, e));
                 }
+                connections.remove(id);
+                log(Level.FINER, String.format("Connection %d closed", id));
                 synchronized (connections) {
-                    connections.remove(id);
-                    log(Level.FINER, String.format("Connection %d closed", id));
-                    if (connections.isEmpty()) {
-                        connections.notifyAll();
-                    }
+                    connections.notifyAll();
                 }
             } else {
                 log(Level.FINEST, String.format("Connection %d already closed", id));
@@ -428,7 +418,14 @@ public class Node {
                     }
                     for (; ; ) {
                         log(Level.FINEST, "Waiting for new package");
-                        Pair<byte[], Long> item = outboundPackages.take();
+                        Pair<byte[], Long> item;
+                        do {
+                            item = outboundPackages.poll(10, TimeUnit.SECONDS);
+                            if (!connections.containsKey(id)) {
+                                log(Level.SEVERE, "Connection has been closed");
+                                return;
+                            }
+                        } while (item == null);
                         long dequeueTimestamp = System.nanoTime();
                         byte[] bytes = item.getLeft();
                         long enqueueTimestamp = item.getRight();
@@ -438,10 +435,10 @@ public class Node {
                                 outboundPackages.size(), (dequeueTimestamp - enqueueTimestamp) / 1.0e3, pkg.message()));
                         try {
                             sktOutput.writeObject(pkg);
+                            sktOutput.reset();
                             log(pkg.message().logLevel(), String.format("Sent message %s", pkg.message()));
                         } catch (IOException e) {
                             log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg.message()));
-                            send(pkg.message());
                             try {
                                 sktOutput.close();
                             } catch (IOException ignored) {
