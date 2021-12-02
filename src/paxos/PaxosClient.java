@@ -17,6 +17,7 @@ public final class PaxosClient extends Node implements Client {
     private final Address[] servers;
 
     private AMOCommand currentCommand = null;
+    private long startTime = -1;
     private AMOResult result = null;
     private int seqNum = 0;
 
@@ -41,6 +42,7 @@ public final class PaxosClient extends Node implements Client {
         currentCommand = new AMOCommand(operation, ++seqNum, address());
         broadcast(new PaxosRequest(currentCommand), servers);
         set(new ClientTimeout(currentCommand));
+        startTime = System.nanoTime();
     }
 
     @Override
@@ -65,6 +67,8 @@ public final class PaxosClient extends Node implements Client {
     private synchronized void handlePaxosReply(PaxosReply m, Address sender) {
         if (currentCommand != null && result == null &&
                 currentCommand.sequenceNum() == m.amoResult().sequenceNum()) {
+            log(Level.FINEST, String.format(
+                    "Time cost %.3f ms for command: %s", (System.nanoTime() - startTime) / 1.0e6, currentCommand));
             result = m.amoResult();
             notify();
         }
@@ -111,7 +115,6 @@ public final class PaxosClient extends Node implements Client {
                 String opt = st.nextToken().toUpperCase();
                 long locknum = Long.parseLong(st.nextToken());
 
-
                 if (opt.equals("LOCK")) {
                     cmd = new LockCommand(LockCommand.Operation.LOCK, locknum, signature);
                 } else if (opt.equals("UNLOCK")) {
@@ -127,7 +130,8 @@ public final class PaxosClient extends Node implements Client {
                 client.sendCommand(cmd);
                 Result res = client.getResult();
 
-                System.out.printf("%s%n", res.toString());
+                System.out.printf("Result: %s%nTime cost: %.3f ms%n",
+                        res, (System.nanoTime() - client.startTime) / 1.0e6);
             }
         }
     }
