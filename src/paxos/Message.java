@@ -1,16 +1,29 @@
 package paxos;
 
-import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.ToString;
 
 import java.io.Serializable;
 
 public interface Message extends Serializable, Logged {
 }
 
-@Data
+@ToString
+@EqualsAndHashCode
 class Package implements Serializable {
 
+    @Getter
     private final Address sender;
+    @Getter
+    private final int hash;
+    @Getter
     private final Message message;
+
+    public Package(Address sender, Message message) {
+        this.sender = sender;
+        this.message = message;
+        this.hash = message.hashCode();
+    }
 
 }

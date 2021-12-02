@@ -323,12 +323,13 @@ public class Node {
         }
 
         public void send(Message message) {
-            log(Level.FINEST, String.format("Enqueuing message %s", message));
+            Package pkg = new Package(Node.this.address, message);
+            log(Level.FINEST, String.format("Enqueuing package %s", pkg));
             try {
                 ByteArrayOutputStream byteOutput = new ByteArrayOutputStream();
                 ObjectOutputStream objOutput = new ObjectOutputStream(byteOutput);
 
-                objOutput.writeObject(new Package(Node.this.address, message));
+                objOutput.writeObject(pkg);
                 objOutput.flush();
                 objOutput.close();
                 byte[] bytes = byteOutput.toByteArray();
@@ -338,13 +339,13 @@ public class Node {
                 } else {
                     if (!outboundPackages.offer(Pair.of(bytes, System.nanoTime()))) {
                         log(Level.SEVERE, String.format(
-                                "Message ignored because of full outbound package queue: %s", message));
+                                "Package ignored because of full outbound package queue: %s", pkg));
                         synchronized (connections) {
                             connections.notifyAll();
                         }
                     } else {
                         log(Level.FINEST, String.format(
-                                "Enqueued message %s; Queue size: %d", message, outboundPackages.size()));
+                                "Enqueued package %s; Queue size: %d", pkg, outboundPackages.size()));
                     }
                 }
             } catch (Throwable e) {
@@ -425,14 +426,14 @@ public class Node {
                         long enqueueTimestamp = item.getRight();
                         Package pkg = deserialize(bytes);
                         log(Level.FINEST, String.format(
-                                "Message dequeued; Queue size: %d; Queue delay: %.3f us; Dequeued message: %s",
-                                outboundPackages.size(), (dequeueTimestamp - enqueueTimestamp) / 1.0e3, pkg.message()));
+                                "Package dequeued; Queue size: %d; Queue delay: %.3f us; Dequeued package: %s",
+                                outboundPackages.size(), (dequeueTimestamp - enqueueTimestamp) / 1.0e3, pkg));
                         try {
                             sktOutput.writeObject(pkg);
                             sktOutput.reset();
-                            log(pkg.message().logLevel(), String.format("Sent message %s", pkg.message()));
+                            log(pkg.message().logLevel(), String.format("Sent package %s", pkg));
                         } catch (IOException e) {
-                            log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg.message()));
+                            log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg));
                             try {
                                 sktOutput.close();
                             } catch (IOException ignored) {
@@ -496,7 +497,7 @@ public class Node {
                         }
                         Message message = pkg.message();
                         Address sender = pkg.sender();
-                        log(message.logLevel(), String.format("Got message from %s: %s ", sender.hostname(), message));
+                        log(message.logLevel(), String.format("Got package from %s: %s ", sender.hostname(), pkg));
                         dynamicExecutor.execute(() -> handleMessage(message, sender));
                     }
                 } catch (Throwable e) {
