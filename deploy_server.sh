@@ -11,5 +11,5 @@ done < "${ip_configs}"
 
 while IFS= read -r line
 do
-  ssh "user@${line}" "java -jar ~/paxos_server.jar ~/${ip_configs}" &
+  ssh "user@${line}" "java -XX:+HeapDumpOnOutOfMemoryError -jar ~/paxos_server.jar ~/${ip_configs}" &
 done < "${ip_configs}"
