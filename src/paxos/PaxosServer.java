@@ -19,18 +19,18 @@ public class PaxosServer extends Node {
     private final Address[] servers;
 
     private Address leader; // current leader address
-    private Map<Address, Boolean> alive; // alive server same as lab2
-    private AMOApplication app; // AMO application wrapper
-    private Map<Address, Integer> serverExecuted; // the latest executed command slot num for each server (gc purpose)
+    private final Map<Address, Boolean> alive; // alive server same as lab2
+    private final AMOApplication app; // AMO application wrapper
+    private final Map<Address, Integer> serverExecuted; // the latest executed command slot num for each server (gc purpose)
 
-    private Slots executed; // executed command slots
+    private final Slots executed; // executed command slots
     private LinkedHashSet<AMOCommand> uncertain; // uncertain command slots.
     // For acceptors, they are newly accepted commands, but possibly
     // rejected because of only minority acceptors accept.
     // For leader, they are commands waiting to be accepted.
     // LinkedHashSet can preserve order of iteration
     private Leader leaderRole; // constructed when acting as leader
-    private Acceptor acceptorRole; // constructed all the time
+    private final Acceptor acceptorRole; // constructed all the time
 
     boolean prepareTimeoutSet, acceptTimeoutSet; // specific timeout is set
 
@@ -45,7 +45,11 @@ public class PaxosServer extends Node {
         super(address);
         this.servers = servers;
 
+        this.alive = new HashMap<>();
         this.app = new AMOApplication(app);
+        this.serverExecuted = new HashMap<>();
+        this.executed = new Slots();
+        this.acceptorRole = new Acceptor();
     }
 
     @Override
@@ -53,16 +57,12 @@ public class PaxosServer extends Node {
         super.init();
         Address thisAddr = address();
         Arrays.sort(servers); // convenient for choosing highest address leader
-        this.serverExecuted = new HashMap<>();
         for (Address addr : servers) {
             if (!addr.equals(thisAddr)) {
                 serverExecuted.put(addr, 0);
             }
         }
         this.leader = address(); // every server is initialized with themselves as leader
-        this.alive = new HashMap<>();
-        this.acceptorRole = new Acceptor();
-        this.executed = new Slots();
         this.uncertain = new LinkedHashSet<>();
         set(new PingTimeout());
     }
@@ -144,7 +144,7 @@ public class PaxosServer extends Node {
                             // majority.
                             if (leaderRole.maxAcceptedNum.getMiddle().equals(address())) {
                                 if (execute(leaderRole.maxState.getLeft().commands, leaderRole.maxState.getLeft().begin)) {
-                                    leaderRole.pendingRequests.removeAll(leaderRole.maxState.getLeft().commands);
+                                    leaderRole.maxState.getLeft().commands.forEach(leaderRole.pendingRequests::remove);
                                 }
                                 if (execute(leaderRole.maxState.getRight(), leaderRole.maxState.getLeft().end())) {
                                     leaderRole.pendingRequests.removeAll(leaderRole.maxState.getRight());
