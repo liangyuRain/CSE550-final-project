@@ -13,6 +13,7 @@ import java.net.SocketTimeoutException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.SimpleFormatter;
@@ -49,26 +50,19 @@ public class Node {
 
         this.scheduledExecutor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(10);
         this.dynamicExecutor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
-        this.scheduledExecutor.scheduleWithFixedDelay(
+
+        Function<ThreadPoolExecutor, Runnable> logThreadPool = executor ->
                 () -> log(Level.FINEST, String.format(
-                        "ScheduledThreadPoolExecutor info: " +
-                                "Queue size: %d, Num of active thread: %d, Pool size: %d, Core pool size: %d",
-                        scheduledExecutor.getQueue().size(),
-                        scheduledExecutor.getActiveCount(),
-                        scheduledExecutor.getPoolSize(),
-                        scheduledExecutor.getCorePoolSize())),
-                0, 10, TimeUnit.SECONDS
-        );
+                        "%s info: Queue size: %d, Num of active thread: %d, Pool size: %d, Core pool size: %d",
+                        executor.getClass().getSimpleName(),
+                        executor.getQueue().size(),
+                        executor.getActiveCount(),
+                        executor.getPoolSize(),
+                        executor.getCorePoolSize()));
         this.scheduledExecutor.scheduleWithFixedDelay(
-                () -> log(Level.FINEST, String.format(
-                        "ThreadPoolExecutor info: " +
-                                "Queue size: %d, Num of active thread: %d, Pool size: %d, Core pool size: %d",
-                        dynamicExecutor.getQueue().size(),
-                        dynamicExecutor.getActiveCount(),
-                        dynamicExecutor.getPoolSize(),
-                        dynamicExecutor.getCorePoolSize())),
-                0, 10, TimeUnit.SECONDS
-        );
+                logThreadPool.apply(scheduledExecutor), 0, 10, TimeUnit.SECONDS);
+        this.scheduledExecutor.scheduleWithFixedDelay(
+                logThreadPool.apply(dynamicExecutor), 0, 10, TimeUnit.SECONDS);
     }
 
     void init() {
