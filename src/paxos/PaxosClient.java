@@ -134,11 +134,6 @@ public final class PaxosClient extends Node implements Client {
 
             if (cmd != null) {
                 client.sendCommand(cmd);
-                synchronized (client) {
-                    while (!client.hasResult()) {
-                        client.wait(1000);
-                    }
-                }
                 Result res = client.getResult();
 
                 System.out.printf("%s%n", res.toString());
