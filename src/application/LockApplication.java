@@ -1,19 +1,21 @@
 package application;
 
 import java.io.Serializable;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class LockApplication implements Serializable, Application {
 
-    private Map<Long, Long> locks;
+    private final Map<Long, Long> locks;
+    private final Map<Long, Long> operationCounter;
 
     public LockApplication() {
-        this.locks = new ConcurrentHashMap<>();
+        this.locks = new HashMap<>();
+        this.operationCounter = new HashMap<>();
     }
 
     @Override
-    public Result execute(Command command) {
+    public synchronized Result execute(Command command) {
         if (!(command instanceof LockCommand)) {
             return null;
         }
@@ -21,20 +23,22 @@ public class LockApplication implements Serializable, Application {
 
         long locknum = lockCommand.locknum();
         Long signature = lockCommand.signature();
+        long count = operationCounter.getOrDefault(locknum, 0L) + 1;
+        operationCounter.put(locknum, count);
         switch (lockCommand.operation()) {
             case LOCK:
                 if (!locks.containsKey(locknum)) {
                     locks.put(locknum, signature);
-                    return LockResult.success;
+                    return new LockResult(true, count);
                 } else {
-                    return LockResult.failure;
+                    return new LockResult(false, count);
                 }
             case UNLOCK:
                 if (signature.equals(locks.get(locknum))) {
                     locks.remove(locknum);
-                    return LockResult.success;
+                    return new LockResult(true, count);
                 } else {
-                    return LockResult.failure;
+                    return new LockResult(false, count);
                 }
             default:
                 return null;
