@@ -72,6 +72,7 @@ public class PaxosServer extends Node {
     private void received(Address sender) {
         if (sender.compareTo(leader) > 0) { // new leader found
             leader = sender;
+            super.log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
         }
         if (!leader.equals(address())) {
             leaderRole = null;
@@ -80,6 +81,9 @@ public class PaxosServer extends Node {
                 prevAcceptorAcceptedNum = null;
                 prevAcceptorState = null;
             }
+        }
+        if (!alive.containsKey(sender)) {
+            super.log(Level.INFO, String.format("Server %s revived", sender.hostname()));
         }
         alive.put(sender, true);
     }
@@ -245,6 +249,7 @@ public class PaxosServer extends Node {
             while (iter.hasNext()) { // check all servers' aliveness, optimized using iterator
                 Map.Entry<Address, Boolean> entry = iter.next();
                 if (!entry.getValue()) {
+                    super.log(Level.INFO, String.format("Server %s dead", entry.getKey().hostname()));
                     iter.remove();
                 } else {
                     entry.setValue(false);
@@ -255,6 +260,7 @@ public class PaxosServer extends Node {
                 for (int i = servers.length - 1; i >= 0; --i) {
                     if (alive.containsKey(servers[i])) {
                         leader = servers[i];
+                        super.log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
                         if (leader.equals(address())) {
                             leaderRole = new Leader();
                         }
