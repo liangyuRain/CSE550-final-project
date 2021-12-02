@@ -13,5 +13,5 @@ done < "${client_ip_configs}"
 
 while IFS= read -r line
 do
-  ssh "user@${line}" "java -jar ~/test_client.jar ~/${server_ip_configs}"
+  ssh "user@${line}" "java -XX:+HeapDumpOnOutOfMemoryError -jar ~/test_client.jar ~/${server_ip_configs}" &
 done < "${client_ip_configs}"
