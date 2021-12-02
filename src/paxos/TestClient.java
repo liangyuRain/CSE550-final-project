@@ -5,10 +5,9 @@ import application.LockApplication;
 import application.LockCommand;
 import application.Result;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.net.SocketException;
-import java.net.UnknownHostException;
+import java.util.ArrayDeque;
+import java.util.Queue;
 import java.util.Random;
 import java.util.logging.Level;
 
@@ -33,17 +32,16 @@ public class TestClient {
         PaxosClient client = new PaxosClient(localAddr, addrs);
         client.setLogLevel(Level.OFF);
         client.init();
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                client.listen();
-            }
-        }).start();
+        new Thread(client::listen).start();
 
         Application app = new LockApplication();
         Random r = new Random();
 
+        Queue<Long> timestamps = new ArrayDeque<>();
         for (; ; ) {
+            long startTime = System.nanoTime();
+            timestamps.add(startTime);
+
             long locknum = signature * (1 + r.nextInt(TEST_KEY_NUM));
             LockCommand.Operation opt = r.nextBoolean() ? LockCommand.Operation.LOCK : LockCommand.Operation.UNLOCK;
 
@@ -52,17 +50,20 @@ public class TestClient {
             System.out.printf("Sending command: %s%n", cmd);
 
             client.sendCommand(cmd);
-            synchronized (client) {
-                while (!client.hasResult()) {
-                    client.wait(1000);
-                }
-            }
             Result res = client.getResult();
             Result res2 = app.execute(cmd);
 
+            long endTime = System.nanoTime();
+            while (!timestamps.isEmpty() && timestamps.peek() < endTime - 1e9) {
+                timestamps.remove();
+            }
+            double throughput = timestamps.isEmpty() ?
+                    1 / ((endTime - startTime) / 1.0e9) : timestamps.size() / ((endTime - timestamps.peek()) / 1.0e9);
+
             System.out.printf("Received result: %s, Expected result: %s%n", res, res2);
             client.log(Level.INFO, String.format(
-                    "Received result: %s, Expected result: %s, Command: %s", res, res2, cmd));
+                    "Received result: %s, Expected result: %s, Test throughput: %.3f per second, Command: %s",
+                    res, res2, throughput, cmd));
 
             if (!res.equals(res2)) {
                 System.out.println("Result does not match");
