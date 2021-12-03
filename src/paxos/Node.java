@@ -189,16 +189,21 @@ public class Node {
         public static final int MESSAGE_QUEUE_CAPACITY = 16;
         public static final int MAX_NUM_OF_CONNECTIONS = 10;
 
+        public static final int TEST_ALIVE_INTERVAL = 100; // millisecond
+        public static final int TEST_ALIVE_TIMEOUT = 3 * TEST_ALIVE_INTERVAL;
+
         private final BlockingQueue<Pair<byte[], Long>> outboundPackages;
         private final Address to;
 
         private final AtomicLong counter;
         private final ConcurrentHashMap<Long, Socket> connections;
+        private final ConcurrentHashMap<Long, Long> lastReceival;
 
         public ConnectionPool(Address to) {
             this.outboundPackages = new ArrayBlockingQueue<>(MESSAGE_QUEUE_CAPACITY);
             this.to = to;
             this.connections = new ConcurrentHashMap<>();
+            this.lastReceival = new ConcurrentHashMap<>();
             this.counter = new AtomicLong(0);
 
             if (!to.equals(Node.this.address())) {
@@ -283,6 +288,7 @@ public class Node {
                 id = counter.getAndIncrement();
                 connections.put(id, skt);
             }
+            lastReceival.put(id, System.currentTimeMillis());
             dynamicExecutor.execute(new SendTask(id));
             dynamicExecutor.execute(new ReceiveTask(id));
             log(Level.FINEST, String.format(
@@ -293,14 +299,14 @@ public class Node {
 
         public void closeConnection(long id) {
             log(Level.FINEST, String.format("Closing connection %d", id));
-            Socket skt = connections.get(id);
+            lastReceival.remove(id);
+            Socket skt = connections.remove(id);
             if (skt != null) {
                 try {
                     skt.close();
                 } catch (IOException e) {
                     log(Level.SEVERE, String.format("Close connection %d to %s failed with %s", id, to, e));
                 }
-                connections.remove(id);
                 log(Level.FINER, String.format("Connection %d closed", id));
                 synchronized (connections) {
                     connections.notifyAll();
@@ -413,21 +419,32 @@ public class Node {
                     }
                     for (; ; ) {
                         log(Level.FINEST, "Waiting for new package");
-                        Pair<byte[], Long> item;
-                        do {
-                            item = outboundPackages.poll(10, TimeUnit.SECONDS);
-                            if (!connections.containsKey(id)) {
-                                log(Level.SEVERE, "Connection has been closed");
-                                return;
+                        Pair<byte[], Long> item = outboundPackages.poll(TEST_ALIVE_INTERVAL, TimeUnit.MILLISECONDS);
+                        if (!connections.containsKey(id)) {
+                            log(Level.SEVERE, "Connection has been closed");
+                            return;
+                        }
+                        if (System.currentTimeMillis() - lastReceival.get(id) > TEST_ALIVE_TIMEOUT) {
+                            log(Level.SEVERE, "Connection not alive");
+                            try {
+                                sktOutput.close();
+                            } catch (IOException ignored) {
                             }
-                        } while (item == null);
-                        long dequeueTimestamp = System.nanoTime();
-                        byte[] bytes = item.getLeft();
-                        long enqueueTimestamp = item.getRight();
-                        Package pkg = deserialize(bytes);
-                        log(Level.FINEST, String.format(
-                                "Package dequeued; Queue size: %d; Queue delay: %.3f us; Dequeued package: %s",
-                                outboundPackages.size(), (dequeueTimestamp - enqueueTimestamp) / 1.0e3, pkg));
+                            closeConnection(id);
+                            return;
+                        }
+                        Package pkg;
+                        if (item != null) {
+                            long dequeueTimestamp = System.nanoTime();
+                            byte[] bytes = item.getLeft();
+                            long enqueueTimestamp = item.getRight();
+                            pkg = deserialize(bytes);
+                            log(Level.FINEST, String.format(
+                                    "Package dequeued; Queue size: %d; Queue delay: %.3f us; Dequeued package: %s",
+                                    outboundPackages.size(), (dequeueTimestamp - enqueueTimestamp) / 1.0e3, pkg));
+                        } else {
+                            pkg = new Package(Node.this.address, new TestAlive(System.currentTimeMillis()));
+                        }
                         try {
                             sktOutput.writeObject(pkg);
                             sktOutput.reset();
@@ -495,10 +512,17 @@ public class Node {
                             closeConnection(id);
                             return;
                         }
+                        lastReceival.put(id, System.currentTimeMillis());
                         Message message = pkg.message();
                         Address sender = pkg.sender();
-                        log(message.logLevel(), String.format("Got package from %s: %s ", sender.hostname(), pkg));
-                        dynamicExecutor.execute(() -> handleMessage(message, sender));
+                        log(message.logLevel(), String.format("Got package from %s: %s", sender.hostname(), pkg));
+                        if (!(message instanceof TestAlive)) {
+                            dynamicExecutor.execute(() -> handleMessage(message, sender));
+                        }
+                        if (!connections.containsKey(id)) {
+                            log(Level.SEVERE, "Connection has been closed");
+                            return;
+                        }
                     }
                 } catch (Throwable e) {
                     log(e);
