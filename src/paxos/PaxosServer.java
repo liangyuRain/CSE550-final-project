@@ -68,6 +68,9 @@ public class PaxosServer extends Node {
     }
 
     private void received(Address sender) {
+        if (!alive.containsKey(sender)) {
+            super.log(Level.INFO, String.format("Server %s revived", sender.hostname()));
+        }
         if (sender.compareTo(leader) > 0) { // new leader found
             leader = sender;
             super.log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
@@ -79,9 +82,6 @@ public class PaxosServer extends Node {
                 prevAcceptorAcceptedNum = null;
                 prevAcceptorState = null;
             }
-        }
-        if (!alive.containsKey(sender)) {
-            super.log(Level.INFO, String.format("Server %s revived", sender.hostname()));
         }
         alive.put(sender, true);
     }
