@@ -6,9 +6,8 @@ import application.LockCommand;
 import application.Result;
 
 import java.io.IOException;
-import java.util.ArrayDeque;
-import java.util.Queue;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
 import java.lang.Thread;
@@ -16,6 +15,7 @@ import java.lang.Thread;
 public class TestClient {
 
     public static final int TEST_KEY_NUM = 10;
+    public static AtomicLong count = new AtomicLong(0);
 
     public static void main(String[] args) throws IOException, InterruptedException {
         if (args.length < 1) {
@@ -37,44 +37,57 @@ public class TestClient {
         Application app = new LockApplication();
         Random r = new Random();
 
-        Queue<Long> timestamps = new ArrayDeque<>();
+        new Thread(() -> {
+            try {
+                for (; ; ) {
+                    long beginCount = count.get();
+                    long beginTime = System.nanoTime();
+                    Thread.sleep(1000);
+                    long endCount = count.get();
+                    long endTime = System.nanoTime();
+                    double throughput = (endCount - beginCount) / ((endTime - beginTime) / 1.0e9);
+                    client.log(Level.INFO, String.format("Test throughput: %.3f commands per second", throughput));
+                    System.out.printf("[%s] Test throughput: %.3f commands per second%n",
+                            client.address().hostname(), throughput);
+                }
+            } catch (Throwable e) {
+                client.log(e);
+                System.exit(1);
+            }
+        }).start();
+
         for (; ; ) {
             long locknum = signature * (1 + r.nextInt(TEST_KEY_NUM));
             LockCommand.Operation opt = r.nextBoolean() ? LockCommand.Operation.LOCK : LockCommand.Operation.UNLOCK;
 
             LockCommand cmd = new LockCommand(opt, locknum, signature);
 
-            System.out.printf("Sending command: %s%n", cmd);
+            client.log(Level.FINE, String.format("Sending command: %s%n", cmd));
 
             long startTime = System.nanoTime();
-            timestamps.add(startTime);
 
             client.sendCommand(cmd);
             Result res = client.getResult();
 
             long endTime = System.nanoTime();
             long timeCost = endTime - startTime;
-            while (!timestamps.isEmpty() && timestamps.peek() < endTime - 1e9) {
-                timestamps.remove();
-            }
-            double throughput = timestamps.isEmpty() ?
-                    1 / (timeCost / 1.0e9) : timestamps.size() / ((endTime - timestamps.peek()) / 1.0e9);
             Result res2 = app.execute(cmd);
-            System.out.printf("Received result: %s, Expected result: %s, Time cost: %.3f ms%n",
-                    res, res2, timeCost / 1.0e6);
-            client.log(Level.INFO, String.format(
-                    "Received result: %s, Expected result: %s, Time cost: %.3f ms, " +
-                            "Test throughput: %.3f per second, Command: %s",
-                    res, res2, timeCost / 1.0e6, throughput, cmd));
+            client.log(Level.FINE, String.format(
+                    "Received result: %s, Expected result: %s, Time cost: %.3f ms, Command: %s",
+                    res, res2, timeCost / 1.0e6, cmd));
 
             if (!res.equals(res2)) {
-                System.out.println("Result does not match");
+                System.out.printf(
+                        "[%s] Result does not match, Received result: %s, Expected result: %s, Command: %s%n",
+                        client.address().hostname(), res, res2, cmd);
                 client.log(Level.SEVERE, String.format("Result does not match: " +
                         "Received result: %s, Expected result: %s, Command: %s", res, res2, cmd));
                 System.exit(1);
             }
 
-            Thread.sleep(1000);
+            count.incrementAndGet();
+
+//            Thread.sleep(1000);
         }
     }
 
