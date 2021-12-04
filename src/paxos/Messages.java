@@ -1,8 +1,5 @@
 package paxos;
 
-
-// Your code here...
-
 import application.AMOCommand;
 import lombok.Data;
 import lombok.NonNull;

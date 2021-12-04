@@ -86,6 +86,9 @@ public final class PaxosClient extends Node implements Client {
         }
     }
 
+    /* -------------------------------------------------------------------------
+        Main Method
+       -----------------------------------------------------------------------*/
     public static void main(String[] args) throws IOException, InterruptedException {
         if (args.length < 1) {
             System.out.println("Usage: java -jar paxos_client.jar [server ips config]");

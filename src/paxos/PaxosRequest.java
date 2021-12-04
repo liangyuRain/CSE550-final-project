@@ -7,7 +7,7 @@ import java.util.logging.Level;
 
 @Data
 public final class PaxosRequest implements Message {
-	// Your code here...
+
     private final AMOCommand command;
 
     @Override

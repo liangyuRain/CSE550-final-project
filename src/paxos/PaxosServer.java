@@ -505,6 +505,10 @@ public class PaxosServer extends Node {
         }
     }
 
+    /* -------------------------------------------------------------------------
+        Main Method
+       -----------------------------------------------------------------------*/
+
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
             System.out.println("Usage: java -jar paxos_server.jar [server ips config]");

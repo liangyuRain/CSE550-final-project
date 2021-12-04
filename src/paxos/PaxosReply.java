@@ -7,7 +7,7 @@ import java.util.logging.Level;
 
 @Data
 public final class PaxosReply implements Message {
-	// Your code here...
+
     private final Address leader;
     private final AMOResult amoResult;
 
