@@ -185,8 +185,9 @@ public class Node {
 
     private class ConnectionPool {
 
-        public static final int CONNECTION_TIMEOUT = 3000;
-        public static final int MESSAGE_QUEUE_CAPACITY = 16;
+        public static final int CONNECTION_TIMEOUT = 500; // millisecond
+        public static final int RECONNECT_INTERVAL = 100; // millisecond
+        public static final int MESSAGE_QUEUE_CAPACITY = 10;
         public static final int MAX_NUM_OF_CONNECTIONS = 10;
 
         public static final int TEST_ALIVE_INTERVAL = 100; // millisecond
@@ -251,7 +252,7 @@ public class Node {
                             log(Level.SEVERE, String.format("Create connection to %s timed out", to.hostname()));
                         } catch (IOException e) {
                             log(Level.SEVERE, String.format("Create connection to %s failed with %s", to.hostname(), e));
-                            Thread.sleep(CONNECTION_TIMEOUT);
+                            Thread.sleep(RECONNECT_INTERVAL);
                         }
                     }
                 } catch (Throwable e) {
