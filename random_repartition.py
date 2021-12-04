@@ -1,19 +1,20 @@
 import os
 import random
 import time
+from datetime import datetime
 
 TIME_INTERVAL = 10
 TURN_OFF_PROB = 0.25
 
-def turn_on(ip):
-    os.system(f"bash ufw_allow.sh {ip}")
+def turn_on(name):
+    os.system(f"prlctl set {name} --device-set net0 --connect")
 
-def turn_off(ip):
-    os.system(f"bash ufw_deny.sh {ip}")
+def turn_off(name):
+    os.system(f"prlctl set {name} --device-set net0 --disconnect")
 
 if __name__ ==  '__main__':
     server_status = {}
-    with open("server_ips.config") as f:
+    with open("vm_names.config") as f:
         server_status = {l[:-1]: True for l in f}
     ips = list(server_status.keys())
     while True:
@@ -38,5 +39,5 @@ if __name__ ==  '__main__':
             print(f"Turning on {ip}")
             server_status[ip] = True
             turn_on(ip)
-        print(server_status)
+        print(f"{datetime.now()}: {server_status}")
         time.sleep(TIME_INTERVAL)
