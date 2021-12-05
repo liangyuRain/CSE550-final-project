@@ -1,7 +1,6 @@
 package paxos;
 
 import lombok.extern.java.Log;
-import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
@@ -193,7 +192,7 @@ public class Node {
         public static final int TEST_ALIVE_INTERVAL = 100; // millisecond
         public static final int TEST_ALIVE_TIMEOUT = 3 * TEST_ALIVE_INTERVAL;
 
-        private final BlockingQueue<Pair<Package, Long>> outboundPackages;
+        private final PackageQueue outboundPackages;
         private final Address to;
 
         private final AtomicLong counter;
@@ -201,7 +200,7 @@ public class Node {
         private final ConcurrentHashMap<Long, Long> lastReceival;
 
         public ConnectionPool(Address to) {
-            this.outboundPackages = new ArrayBlockingQueue<>(MESSAGE_QUEUE_CAPACITY);
+            this.outboundPackages = new PackageQueue(MESSAGE_QUEUE_CAPACITY);
             this.to = to;
             this.connections = new ConcurrentHashMap<>();
             this.lastReceival = new ConcurrentHashMap<>();
@@ -335,15 +334,15 @@ public class Node {
             if (to.equals(Node.this.address())) {
                 dynamicExecutor.execute(() -> handleMessage(pkg.message(), Node.this.address()));
             } else {
-                if (!outboundPackages.offer(Pair.of(pkg, System.nanoTime()))) {
-                    log(Level.SEVERE, String.format("Package ignored because of full outbound package queue: %s", pkg));
+                Package ignored = outboundPackages.add(pkg);
+                if (ignored != null) {
+                    log(Level.SEVERE, String.format(
+                            "Package ignored because of full outbound package queue: %s", ignored));
                     synchronized (connections) {
                         connections.notifyAll();
                     }
-                } else {
-                    log(Level.FINEST, String.format(
-                            "Enqueued package %s; Queue size: %d", pkg, outboundPackages.size()));
                 }
+                log(Level.FINEST, String.format("Enqueued package %s; Queue size: %d", pkg, outboundPackages.size()));
             }
         }
 
@@ -399,7 +398,7 @@ public class Node {
                     }
                     for (; ; ) {
                         log(Level.FINEST, "Waiting for new package");
-                        Pair<Package, Long> item = outboundPackages.poll(TEST_ALIVE_INTERVAL, TimeUnit.MILLISECONDS);
+                        Package pkg = outboundPackages.poll(TEST_ALIVE_INTERVAL);
                         if (!connections.containsKey(id)) {
                             log(Level.SEVERE, "Connection has been closed");
                             return;
@@ -413,14 +412,10 @@ public class Node {
                             closeConnection(id);
                             return;
                         }
-                        Package pkg;
-                        if (item != null) {
-                            long dequeueTimestamp = System.nanoTime();
-                            long enqueueTimestamp = item.getRight();
-                            pkg = item.getLeft();
+                        if (pkg != null) {
                             log(Level.FINEST, String.format(
-                                    "Package dequeued; Queue size: %d; Queue delay: %.3f us; Dequeued package: %s",
-                                    outboundPackages.size(), (dequeueTimestamp - enqueueTimestamp) / 1.0e3, pkg));
+                                    "Package dequeued; Queue size: %d; Dequeued package: %s",
+                                    outboundPackages.size(), pkg));
                         } else {
                             pkg = new Package(Node.this.address, new TestAlive(System.currentTimeMillis()));
                         }
