@@ -15,4 +15,9 @@ public final class PaxosRequest implements Message {
         return Level.FINER;
     }
 
+    @Override
+    public PaxosRequest immutableCopy() {
+        return new PaxosRequest(command.immutableCopy());
+    }
+
 }

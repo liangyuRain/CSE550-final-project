@@ -16,4 +16,9 @@ public final class PaxosReply implements Message {
         return Level.FINER;
     }
 
+    @Override
+    public PaxosReply immutableCopy() {
+        return new PaxosReply(leader.immutableCopy(), amoResult.immutableCopy());
+    }
+
 }

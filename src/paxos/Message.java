@@ -6,7 +6,9 @@ import lombok.ToString;
 
 import java.io.Serializable;
 
-public interface Message extends Serializable, Logged {
+public interface Message extends Serializable, Logged, Copyable {
+    @Override
+    Message immutableCopy();
 }
 
 @ToString

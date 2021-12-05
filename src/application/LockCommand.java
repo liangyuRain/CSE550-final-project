@@ -13,4 +13,9 @@ public class LockCommand implements Serializable, Command {
     private final long locknum;
     private final long signature;
 
+    @Override
+    public Command immutableCopy() {
+        return this;
+    }
+
 }

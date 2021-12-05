@@ -18,7 +18,6 @@ public final class AMOApplication implements Application {
     @NonNull
     private final Application application;
 
-    // Your code here...
     private final Map<Address, AMOResult> executed = new HashMap<>();
 
     @Override
@@ -59,7 +58,6 @@ public final class AMOApplication implements Application {
     }
 
     public boolean alreadyExecuted(AMOCommand amoCommand) {
-        // Your code here...
         AMOResult result = executed.get(amoCommand.clientAddr());
         return result != null && amoCommand.sequenceNum() <= result.sequenceNum();
     }

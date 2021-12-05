@@ -193,7 +193,7 @@ public class Node {
         public static final int TEST_ALIVE_INTERVAL = 100; // millisecond
         public static final int TEST_ALIVE_TIMEOUT = 3 * TEST_ALIVE_INTERVAL;
 
-        private final BlockingQueue<Pair<byte[], Long>> outboundPackages;
+        private final BlockingQueue<Pair<Package, Long>> outboundPackages;
         private final Address to;
 
         private final AtomicLong counter;
@@ -330,34 +330,20 @@ public class Node {
         }
 
         public void send(Message message) {
-            Package pkg = new Package(Node.this.address, message);
+            Package pkg = new Package(Node.this.address, message.immutableCopy());
             log(Level.FINEST, String.format("Enqueuing package %s", pkg));
-            try {
-                ByteArrayOutputStream byteOutput = new ByteArrayOutputStream();
-                ObjectOutputStream objOutput = new ObjectOutputStream(byteOutput);
-
-                objOutput.writeObject(pkg);
-                objOutput.flush();
-                objOutput.close();
-                byte[] bytes = byteOutput.toByteArray();
-                if (to.equals(Node.this.address())) {
-                    Message copy = deserialize(bytes).message();
-                    dynamicExecutor.execute(() -> handleMessage(copy, Node.this.address()));
-                } else {
-                    if (!outboundPackages.offer(Pair.of(bytes, System.nanoTime()))) {
-                        log(Level.SEVERE, String.format(
-                                "Package ignored because of full outbound package queue: %s", pkg));
-                        synchronized (connections) {
-                            connections.notifyAll();
-                        }
-                    } else {
-                        log(Level.FINEST, String.format(
-                                "Enqueued package %s; Queue size: %d", pkg, outboundPackages.size()));
+            if (to.equals(Node.this.address())) {
+                dynamicExecutor.execute(() -> handleMessage(pkg.message(), Node.this.address()));
+            } else {
+                if (!outboundPackages.offer(Pair.of(pkg, System.nanoTime()))) {
+                    log(Level.SEVERE, String.format("Package ignored because of full outbound package queue: %s", pkg));
+                    synchronized (connections) {
+                        connections.notifyAll();
                     }
+                } else {
+                    log(Level.FINEST, String.format(
+                            "Enqueued package %s; Queue size: %d", pkg, outboundPackages.size()));
                 }
-            } catch (Throwable e) {
-                log(e);
-                System.exit(1);
             }
         }
 
@@ -376,13 +362,6 @@ public class Node {
                 log(e);
                 System.exit(1);
             }
-        }
-
-        private Package deserialize(byte[] bytes) throws IOException, ClassNotFoundException {
-            ObjectInputStream objInput = new ObjectInputStream(new ByteArrayInputStream(bytes));
-            Package pkg = (Package) objInput.readObject();
-            objInput.close();
-            return pkg;
         }
 
         private class SendTask implements Runnable {
@@ -420,7 +399,7 @@ public class Node {
                     }
                     for (; ; ) {
                         log(Level.FINEST, "Waiting for new package");
-                        Pair<byte[], Long> item = outboundPackages.poll(TEST_ALIVE_INTERVAL, TimeUnit.MILLISECONDS);
+                        Pair<Package, Long> item = outboundPackages.poll(TEST_ALIVE_INTERVAL, TimeUnit.MILLISECONDS);
                         if (!connections.containsKey(id)) {
                             log(Level.SEVERE, "Connection has been closed");
                             return;
@@ -437,9 +416,8 @@ public class Node {
                         Package pkg;
                         if (item != null) {
                             long dequeueTimestamp = System.nanoTime();
-                            byte[] bytes = item.getLeft();
                             long enqueueTimestamp = item.getRight();
-                            pkg = deserialize(bytes);
+                            pkg = item.getLeft();
                             log(Level.FINEST, String.format(
                                     "Package dequeued; Queue size: %d; Queue delay: %.3f us; Dequeued package: %s",
                                     outboundPackages.size(), (dequeueTimestamp - enqueueTimestamp) / 1.0e3, pkg));

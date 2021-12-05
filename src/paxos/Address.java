@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Scanner;
 
 @Data
-public class Address implements Comparable<Address>, Serializable {
+public class Address implements Comparable<Address>, Serializable, Copyable {
 
     public static final int PORT = 5000;
     private final String hostname;
@@ -58,6 +58,11 @@ public class Address implements Comparable<Address>, Serializable {
     @Override
     public String toString() {
         return String.format("%s(%s)", this.getClass().getSimpleName(), hostname);
+    }
+
+    @Override
+    public Address immutableCopy() {
+        return this;
     }
 
 }

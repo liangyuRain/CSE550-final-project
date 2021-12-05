@@ -7,6 +7,7 @@ import org.apache.commons.lang3.tuple.*;
 
 import java.util.LinkedHashSet;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 
 @Data
 class Ping implements Message {
@@ -18,17 +19,28 @@ class Ping implements Message {
         return Level.FINEST;
     }
 
+    @Override
+    public Ping immutableCopy() {
+        return this;
+    }
+
 }
 
 @Data
 class PrepareRequest implements Message {
 
     @NonNull
-    private final Pair<Integer, Address> proposalNum;
+    private final ImmutablePair<Integer, Address> proposalNum;
+    private final int nextToExecute;
 
     @Override
     public Level logLevel() {
         return Level.FINER;
+    }
+
+    @Override
+    public PrepareRequest immutableCopy() {
+        return this;
     }
 
 }
@@ -37,17 +49,30 @@ class PrepareRequest implements Message {
 class PrepareReply implements Message { // success iff proposalNum >= maxProposalNum
 
     @NonNull
-    private final Pair<Integer, Address> proposalNum;
+    private final ImmutablePair<Integer, Address> proposalNum;
     private final PaxosServer.Slots executed;
     private final LinkedHashSet<AMOCommand> uncertain;
     @NonNull
-    private final Triple<Integer, Address, Integer> maxAcceptNum;
+    private final ImmutableTriple<Integer, Address, Integer> maxAcceptNum;
     @NonNull
-    private final Pair<Integer, Address> maxProposalNum;
+    private final ImmutablePair<Integer, Address> maxProposalNum;
 
     @Override
     public Level logLevel() {
         return Level.FINER;
+    }
+
+    @Override
+    public PrepareReply immutableCopy() {
+        return new PrepareReply(
+                proposalNum,
+                executed.immutableCopy(),
+                uncertain.stream()
+                        .map(AMOCommand::immutableCopy)
+                        .collect(Collectors.toCollection(LinkedHashSet::new)),
+                maxAcceptNum,
+                maxProposalNum
+        );
     }
 
 }
@@ -56,7 +81,7 @@ class PrepareReply implements Message { // success iff proposalNum >= maxProposa
 class AcceptRequest implements Message {
 
     @NonNull
-    private final Triple<Integer, Address, Integer> acceptNum;
+    private final ImmutableTriple<Integer, Address, Integer> acceptNum;
     @NonNull
     private final PaxosServer.Slots executed;
     @NonNull
@@ -68,20 +93,37 @@ class AcceptRequest implements Message {
         return Level.FINER;
     }
 
+    @Override
+    public AcceptRequest immutableCopy() {
+        return new AcceptRequest(
+                acceptNum,
+                executed.immutableCopy(),
+                uncertain.stream()
+                        .map(AMOCommand::immutableCopy)
+                        .collect(Collectors.toCollection(LinkedHashSet::new)),
+                nextToExecute
+        );
+    }
+
 }
 
 @Data
 class AcceptReply implements Message { // success iff acceptNum >= maxProposalNum
 
     @NonNull
-    private final Triple<Integer, Address, Integer> acceptNum;
+    private final ImmutableTriple<Integer, Address, Integer> acceptNum;
     @NonNull
-    private final Pair<Integer, Address> maxProposalNum;
+    private final ImmutablePair<Integer, Address> maxProposalNum;
     private final int nextToExecute;
 
     @Override
     public Level logLevel() {
         return Level.FINER;
+    }
+
+    @Override
+    public AcceptReply immutableCopy() {
+        return this;
     }
 
 }
@@ -94,6 +136,11 @@ class TestAlive implements Message {
     @Override
     public Level logLevel() {
         return Level.FINEST;
+    }
+
+    @Override
+    public TestAlive immutableCopy() {
+        return this;
     }
 
 }

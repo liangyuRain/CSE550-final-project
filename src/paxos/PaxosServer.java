@@ -224,11 +224,11 @@ public class PaxosServer extends Node {
         garbageCollect(m.nextToExecute(), sender);
         if (!leader.equals(sender)) return;
         if (m.acceptNum().compareTo(acceptorRole.maxAcceptNum) >= 0) { // accept the request and sync with leader state
-            acceptorRole.maxPrepareNum = Pair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
+            acceptorRole.maxPrepareNum = ImmutablePair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
             acceptorRole.maxAcceptNum = m.acceptNum();
             execute(m.executed().commands, m.executed().begin);
             uncertain = m.uncertain().stream()
-                    .filter(((Predicate<AMOCommand>)app::alreadyExecuted).negate())
+                    .filter(((Predicate<AMOCommand>) app::alreadyExecuted).negate())
                     .collect(Collectors.toCollection(LinkedHashSet::new));
             // the proposed commands may be rejected by other majority of servers, so they cannot be executed and stored
             // in uncertain
@@ -280,7 +280,7 @@ public class PaxosServer extends Node {
             List<Address> aliveDests = leaderRole.noPrepareReply.stream()
                     .filter(alive::containsKey)
                     .collect(Collectors.toList());
-            broadcast(new PrepareRequest(leaderRole.proposalNum), aliveDests);
+            broadcast(new PrepareRequest(ImmutablePair.of(leaderRole.proposalNum), executed.end()), aliveDests);
         } else {
             prepareTimeoutSet = false;
         }
@@ -300,13 +300,13 @@ public class PaxosServer extends Node {
             if (!senders.isEmpty()) { // in case some server still not receive prepare request so cannot respond
                 // accept request. Broadcast prepare request to all servers without neither
                 // prepare reply nor accept reply
-                broadcast(new PrepareRequest(leaderRole.proposalNum), senders);
+                broadcast(new PrepareRequest(ImmutablePair.of(leaderRole.proposalNum), executed.end()), senders);
             }
             List<Address> aliveDests = leaderRole.noAcceptReply.stream()
                     .filter(alive::containsKey)
                     .collect(Collectors.toList());
             broadcast(new AcceptRequest(
-                    Triple.of(leaderRole.proposalNum.left, leaderRole.proposalNum.right, leaderRole.acceptRound),
+                    ImmutableTriple.of(leaderRole.proposalNum.left, leaderRole.proposalNum.right, leaderRole.acceptRound),
                     executed.startFrom(aliveDests.stream()
                             .map(serverExecuted::get)
                             .min(Integer::compare)
@@ -379,8 +379,8 @@ public class PaxosServer extends Node {
                 prepareTimeoutSet = true;
                 set(prepareTimeout);
             }
-            acceptorRole.maxPrepareNum = new ImmutablePair<>(proposalNum.left, proposalNum.right);
-            broadcast(new PrepareRequest(proposalNum),
+            acceptorRole.maxPrepareNum = ImmutablePair.of(proposalNum);
+            broadcast(new PrepareRequest(ImmutablePair.of(proposalNum), executed.end()),
                     noPrepareReply.stream()
                             .filter(alive::containsKey)
                             .collect(Collectors.toList()));
@@ -394,11 +394,11 @@ public class PaxosServer extends Node {
                 acceptTimeoutSet = true;
                 set(acceptTimeout);
             }
-            acceptorRole.maxAcceptNum = new ImmutableTriple<>(proposalNum.left, proposalNum.right, acceptRound);
+            acceptorRole.maxAcceptNum = ImmutableTriple.of(proposalNum.left, proposalNum.right, acceptRound);
             List<Address> aliveDests = noAcceptReply.stream()
                     .filter(alive::containsKey)
                     .collect(Collectors.toList());
-            broadcast(new AcceptRequest(Triple.of(proposalNum.left, proposalNum.right, acceptRound),
+            broadcast(new AcceptRequest(ImmutableTriple.of(proposalNum.left, proposalNum.right, acceptRound),
                     executed.startFrom(aliveDests.stream()
                             .map(serverExecuted::get)
                             .min(Integer::compare)
@@ -412,25 +412,25 @@ public class PaxosServer extends Node {
     @EqualsAndHashCode
     private class Acceptor implements Serializable {
 
-        Pair<Integer, Address> maxPrepareNum; // maximum prepare num
-        Triple<Integer, Address, Integer> maxAcceptNum; // maximum accept num (prepare num + accept round)
+        ImmutablePair<Integer, Address> maxPrepareNum; // maximum prepare num
+        ImmutableTriple<Integer, Address, Integer> maxAcceptNum; // maximum accept num (prepare num + accept round)
 
         Acceptor() {
-            maxPrepareNum = new ImmutablePair<>(-1, address());
-            maxAcceptNum = new ImmutableTriple<>(-1, address(), 0);
+            maxPrepareNum = ImmutablePair.of(-1, address());
+            maxAcceptNum = ImmutableTriple.of(-1, address(), 0);
         }
 
     }
 
     @ToString
     @EqualsAndHashCode
-    static class Slots implements Serializable { // data structure to represents slots
+    static class Slots implements Serializable, Copyable { // data structure to represents slots
 
-        LinkedList<AMOCommand> commands;
+        ArrayDeque<AMOCommand> commands;
         int begin; // the slot number of the first command
 
         Slots() {
-            commands = new LinkedList<>();
+            commands = new ArrayDeque<>();
             begin = 0;
         }
 
@@ -457,8 +457,16 @@ public class PaxosServer extends Node {
             s.begin = begin;
             s.commands = this.commands.stream()
                     .skip(begin - this.begin)
-                    .collect(Collectors.toCollection(LinkedList::new));
+                    .collect(Collectors.toCollection(ArrayDeque::new));
             return s;
+        }
+
+        @Override
+        public Slots immutableCopy() {
+            Slots copy = new Slots();
+            this.commands.stream().map(AMOCommand::immutableCopy).forEach(copy.commands::add);
+            copy.begin = this.begin;
+            return copy;
         }
 
     }

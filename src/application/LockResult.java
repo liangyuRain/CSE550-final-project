@@ -12,4 +12,9 @@ public class LockResult implements Serializable, Result {
     private final boolean res;
     private final long count;
 
+    @Override
+    public LockResult immutableCopy() {
+        return this;
+    }
+
 }
