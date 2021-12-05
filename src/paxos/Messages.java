@@ -66,8 +66,8 @@ class PrepareReply implements Message { // success iff proposalNum >= maxProposa
     public PrepareReply immutableCopy() {
         return new PrepareReply(
                 proposalNum,
-                executed.immutableCopy(),
-                uncertain.stream()
+                executed == null ? null : executed.immutableCopy(),
+                uncertain == null ? null : uncertain.stream()
                         .map(AMOCommand::immutableCopy)
                         .collect(Collectors.toCollection(LinkedHashSet::new)),
                 maxAcceptNum,
