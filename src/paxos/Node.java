@@ -431,6 +431,8 @@ public class Node {
                 if (ignored != null) {
                     log(Level.SEVERE, String.format(
                             "Package ignored because of full outbound package queue: %s", ignored));
+                }
+                if (outboundPackages.size() >= MESSAGE_QUEUE_CAPACITY / 2) {
                     synchronized (connections) {
                         connections.notifyAll();
                     }
@@ -483,7 +485,7 @@ public class Node {
                     if (skt == null) return;
                     ObjectOutputStream sktOutput;
                     try {
-                        sktOutput = new ObjectOutputStream(skt.getOutputStream());
+                        sktOutput = new ObjectOutputStream(new BufferedOutputStream(skt.getOutputStream()));
                     } catch (IOException e) {
                         log(Level.SEVERE, String.format("Constructing ObjectOutputStream failed with %s", e));
                         closeConnection(id);
@@ -515,6 +517,7 @@ public class Node {
                         try {
                             sktOutput.writeObject(pkg);
                             sktOutput.reset();
+                            sktOutput.flush();
                             log(pkg.message().logLevel(), String.format("Sent package %s", pkg));
                             if (!(pkg.message() instanceof TestAlive)) {
                                 outPkgCounter.incrementAndGet();
@@ -563,7 +566,7 @@ public class Node {
                     if (skt == null) return;
                     ObjectInputStream sktInput;
                     try {
-                        sktInput = new ObjectInputStream(skt.getInputStream());
+                        sktInput = new ObjectInputStream(new BufferedInputStream(skt.getInputStream()));
                     } catch (IOException e) {
                         log(Level.SEVERE, String.format("Constructing ObjectInputStream failed with %s", e));
                         closeConnection(id);
