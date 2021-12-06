@@ -187,9 +187,7 @@ public class PaxosServer extends Node {
                                 super.log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
                                         this.executed.end(), c, result == null ? "null" : result));
                                 executed.commands.add(c);
-                                if (result != null) { // ancient command
-                                    send(new PaxosReply(leader, result), result.clientAddr()); // reply clients
-                                }
+                                send(new PaxosReply(leader, result), result.clientAddr()); // reply clients
                             }
                             uncertain.clear();
                             leaderRole.newAccept();
