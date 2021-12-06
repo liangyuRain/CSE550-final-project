@@ -1,6 +1,8 @@
 package paxos;
 
+import lombok.Data;
 import lombok.extern.java.Log;
+import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
@@ -25,8 +27,8 @@ public class Node {
                 "[%1$tF %1$tT %1$tL] %5$s %n");
     }
 
-    private static final int LOG_FILE_SIZE_LIMIT = Integer.MAX_VALUE;
-    private static final int LOG_FILE_COUNT = 1;
+    private static final int LOG_FILE_SIZE_LIMIT = 1024 * 1024 * 1024;
+    private static final int LOG_FILE_COUNT = 2;
 
     private final Address address;
 
@@ -62,6 +64,7 @@ public class Node {
                 logThreadPool.apply(scheduledExecutor), 0, 10, TimeUnit.SECONDS);
         this.scheduledExecutor.scheduleWithFixedDelay(
                 logThreadPool.apply(dynamicExecutor), 0, 10, TimeUnit.SECONDS);
+        this.dynamicExecutor.execute(this::logConnectionPools);
     }
 
     void init() {
@@ -73,8 +76,9 @@ public class Node {
             for (; ; ) {
                 try {
                     Socket clientSocket = serverSkt.accept();
-                    String clientHostname = ((InetSocketAddress) clientSocket.getRemoteSocketAddress()).getHostName();
-                    Address clientAddr = new Address(clientHostname);
+                    String clientHostAddr =
+                            ((InetSocketAddress) clientSocket.getRemoteSocketAddress()).getAddress().getHostAddress();
+                    Address clientAddr = new Address(clientHostAddr);
                     log(Level.FINEST, String.format(
                             "Accepted connection from %s: %s", clientAddr.hostname(), clientSocket));
                     dynamicExecutor.execute(() -> addrToConn
@@ -118,6 +122,68 @@ public class Node {
 
     protected void log(Throwable e) {
         this.log(e, "");
+    }
+
+    protected void logConnectionPools() {
+        try {
+            HashMap<Address, ConnectionPoolStat> lastConnPoolStats = new HashMap<>();
+            for (; ; ) {
+                double totalOutThroughput = 0.0;
+                double totalInThroughput = 0.0;
+                long totalQueueDelay = 0;
+                long totalQueueCount = 0;
+
+                StringBuilder sb = new StringBuilder();
+                sb.append("Log of ConnectionPools:");
+                sb.append(System.lineSeparator());
+                for (Map.Entry<Address, ConnectionPool> entry : addrToConn.entrySet()) {
+                    Address addr = entry.getKey();
+                    ConnectionPoolStat connPoolStat = entry.getValue().getConnectionPoolStat();
+                    sb.append(String.format(
+                            "Address: %s, Num of connections: %d, PackageQueue size: %d",
+                            addr, connPoolStat.numOfConnections, connPoolStat.packageQueueSize));
+
+                    ConnectionPoolStat lastRecord = lastConnPoolStats.get(addr);
+                    int lastQueueCount = 0;
+                    long lastQueueTotalDelay = 0;
+                    if (lastRecord != null) {
+                        lastQueueCount = lastRecord.queueCount;
+                        lastQueueTotalDelay = lastRecord.queueTotalDelay;
+
+                        double outThroughput = (connPoolStat.outPkgCounter - lastRecord.outPkgCounter) * 1.0e9 /
+                                (connPoolStat.timestamp - lastRecord.timestamp);
+                        double inThroughput = (connPoolStat.inPkgCounter - lastRecord.inPkgCounter) * 1.0e9 /
+                                (connPoolStat.timestamp - lastRecord.timestamp);
+                        sb.append(String.format(
+                                ", Send throughput: %.3f, Receive throughput: %.3f", outThroughput, inThroughput));
+
+                        totalOutThroughput += outThroughput;
+                        totalInThroughput += inThroughput;
+                    }
+                    double averageQueueDelay = (connPoolStat.queueTotalDelay - lastQueueTotalDelay) / 1.0e3 /
+                            (connPoolStat.queueCount - lastQueueCount);
+                    sb.append(String.format(", Average queue delay: %.3f us", averageQueueDelay));
+
+                    totalQueueDelay += connPoolStat.queueTotalDelay - lastQueueTotalDelay;
+                    totalQueueCount += connPoolStat.queueCount - lastQueueCount;
+
+                    lastConnPoolStats.put(addr, connPoolStat);
+
+                    sb.append(System.lineSeparator());
+                }
+                sb.append(String.format(
+                        "Total send throughput: %.3f, Total receive throughput: %.3f, " +
+                                "Overall average queue delay: %.3f us",
+                        totalOutThroughput, totalInThroughput, totalQueueDelay / 1.0e3 / totalQueueCount));
+
+                log(Level.FINEST, sb.toString());
+
+                Thread.sleep(10 * 1000);
+            }
+        } catch (Throwable e) {
+            log(e);
+            System.exit(1);
+        }
     }
 
     protected void send(Message message, Address to) {
@@ -182,14 +248,24 @@ public class Node {
 
     }
 
+    @Data
+    private static class ConnectionPoolStat {
+        private final int numOfConnections, packageQueueSize;
+        private final long outPkgCounter, inPkgCounter;
+        private final int queueCount;
+        private final long queueTotalDelay;
+        private final long timestamp;
+    }
+
     private class ConnectionPool {
 
         public static final int CONNECTION_TIMEOUT = 500; // millisecond
-        public static final int RECONNECT_INTERVAL = 100; // millisecond
+        public static final int RECONNECT_INTERVAL = 500; // millisecond
         public static final int MESSAGE_QUEUE_CAPACITY = 10;
-        public static final int MAX_NUM_OF_CONNECTIONS = 10;
+        public static final int MIN_NUM_OF_CONNECTIONS = 10;
+        public static final int MAX_NUM_OF_CONNECTIONS = MIN_NUM_OF_CONNECTIONS * 4;
 
-        public static final int TEST_ALIVE_INTERVAL = 100; // millisecond
+        public static final int TEST_ALIVE_INTERVAL = 500; // millisecond
         public static final int TEST_ALIVE_TIMEOUT = 3 * TEST_ALIVE_INTERVAL;
 
         private final PackageQueue outboundPackages;
@@ -199,16 +275,33 @@ public class Node {
         private final ConcurrentHashMap<Long, Socket> connections;
         private final ConcurrentHashMap<Long, Long> lastReceival;
 
+        private final AtomicLong outPkgCounter, inPkgCounter;
+
         public ConnectionPool(Address to) {
             this.outboundPackages = new PackageQueue(MESSAGE_QUEUE_CAPACITY);
             this.to = to;
             this.connections = new ConcurrentHashMap<>();
             this.lastReceival = new ConcurrentHashMap<>();
             this.counter = new AtomicLong(0);
+            this.outPkgCounter = new AtomicLong(0);
+            this.inPkgCounter = new AtomicLong(0);
 
             if (!to.equals(Node.this.address())) {
                 dynamicExecutor.execute(new ConnectionCreationTask());
             }
+        }
+
+        public ConnectionPoolStat getConnectionPoolStat() {
+            Pair<Integer, Long> queueStat = outboundPackages.stat();
+            return new ConnectionPoolStat(
+                    connections.size(),
+                    outboundPackages.size(),
+                    outPkgCounter.get(),
+                    inPkgCounter.get(),
+                    queueStat.getLeft(),
+                    queueStat.getRight(),
+                    System.nanoTime()
+            );
         }
 
         private class ConnectionCreationTask implements Runnable {
@@ -222,7 +315,7 @@ public class Node {
                                 int capacityRemain = outboundPackages.remainingCapacity();
                                 int numOfConnection = connections.size();
 
-                                if ((numOfConnection >= 2 && capacityRemain > 0) ||
+                                if ((numOfConnection >= MIN_NUM_OF_CONNECTIONS && capacityRemain > 0) ||
                                         numOfConnection >= MAX_NUM_OF_CONNECTIONS) {
                                     log(Level.FINEST, String.format(
                                             "Connection creation enters sleep, " +
@@ -417,12 +510,15 @@ public class Node {
                                     "Package dequeued; Queue size: %d; Dequeued package: %s",
                                     outboundPackages.size(), pkg));
                         } else {
-                            pkg = new Package(Node.this.address, new TestAlive(System.currentTimeMillis()));
+                            pkg = new Package(Node.this.address, new TestAlive(System.nanoTime()));
                         }
                         try {
                             sktOutput.writeObject(pkg);
                             sktOutput.reset();
                             log(pkg.message().logLevel(), String.format("Sent package %s", pkg));
+                            if (!(pkg.message() instanceof TestAlive)) {
+                                outPkgCounter.incrementAndGet();
+                            }
                         } catch (IOException e) {
                             log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg));
                             try {
@@ -492,6 +588,7 @@ public class Node {
                         log(message.logLevel(), String.format("Got package from %s: %s", sender.hostname(), pkg));
                         if (!(message instanceof TestAlive)) {
                             dynamicExecutor.execute(() -> handleMessage(message, sender));
+                            inPkgCounter.incrementAndGet();
                         }
                         if (!connections.containsKey(id)) {
                             log(Level.SEVERE, "Connection has been closed");

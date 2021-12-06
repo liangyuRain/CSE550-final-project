@@ -131,7 +131,7 @@ class AcceptReply implements Message { // success iff acceptNum >= maxProposalNu
 @Data
 class TestAlive implements Message {
 
-    private final long timestamp; // System.currentTimeMillis()
+    private final long timestamp; // System.nanoTime()
 
     @Override
     public Level logLevel() {

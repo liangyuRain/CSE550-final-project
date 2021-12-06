@@ -1,5 +1,7 @@
 package paxos;
 
+import org.apache.commons.lang3.tuple.Pair;
+
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
@@ -7,7 +9,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class PackageQueue {
 
-    private final HashSet<Package> pkgSet;
+    private final HashMap<Package, Long> pkgMap;
     private final ArrayDeque<Package> queue;
     private final int capacity;
 
@@ -16,8 +18,11 @@ public class PackageQueue {
     private final ReentrantReadWriteLock.ReadLock readLock;
     private final Condition notEmpty;
 
+    private volatile int count;
+    private volatile long totalDelay;
+
     public PackageQueue(int capacity) {
-        this.pkgSet = new HashSet<>();
+        this.pkgMap = new HashMap<>();
         this.queue = new ArrayDeque<>(capacity);
         this.capacity = capacity;
 
@@ -30,14 +35,14 @@ public class PackageQueue {
     public Package add(Package pkg) {
         writeLock.lock();
         Package ignored = null;
-        if (!pkgSet.contains(pkg)) {
+        if (!pkgMap.containsKey(pkg)) {
             assert(queue.size() <= capacity);
             if (queue.size() == capacity) {
                 ignored = queue.removeFirst();
-                pkgSet.remove(ignored);
+                pkgMap.remove(ignored);
             }
             queue.addLast(pkg);
-            pkgSet.add(pkg);
+            pkgMap.put(pkg, System.nanoTime());
             notEmpty.signal();
         }
         writeLock.unlock();
@@ -55,7 +60,11 @@ public class PackageQueue {
             }
             remainingTime = notEmpty.awaitNanos(remainingTime);
         }
-        pkgSet.remove(pkg);
+        Long timestamp = pkgMap.remove(pkg);
+        if (timestamp != null) {
+            totalDelay += System.nanoTime() - timestamp;
+            ++count;
+        }
         writeLock.unlock();
         return pkg;
     }
@@ -70,6 +79,13 @@ public class PackageQueue {
     public int size() {
         readLock.lock();
         int res = queue.size();
+        readLock.unlock();
+        return res;
+    }
+
+    public Pair<Integer, Long> stat() {
+        readLock.lock();
+        Pair<Integer, Long> res = Pair.of(count, totalDelay);
         readLock.unlock();
         return res;
     }
