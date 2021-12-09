@@ -7,7 +7,7 @@ import application.Result;
 
 import java.io.IOException;
 import java.util.Random;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.logging.Level;
 
 import java.lang.Thread;
@@ -15,7 +15,7 @@ import java.lang.Thread;
 public class TestClient {
 
     public static final int TEST_KEY_NUM = 10;
-    public static AtomicLong count = new AtomicLong(0);
+    public static LongAdder count = new LongAdder();
 
     public static void main(String[] args) throws IOException, InterruptedException {
         if (args.length < 1) {
@@ -40,10 +40,10 @@ public class TestClient {
         new Thread(() -> {
             try {
                 for (; ; ) {
-                    long beginCount = count.get();
+                    long beginCount = count.sum();
                     long beginTime = System.nanoTime();
                     Thread.sleep(1000);
-                    long endCount = count.get();
+                    long endCount = count.sum();
                     long endTime = System.nanoTime();
                     double throughput = (endCount - beginCount) / ((endTime - beginTime) / 1.0e9);
                     client.log(Level.INFO, String.format("Test throughput: %.3f commands per second", throughput));
@@ -85,7 +85,7 @@ public class TestClient {
                 System.exit(1);
             }
 
-            count.incrementAndGet();
+            count.increment();
 
 //            Thread.sleep(1000);
         }
