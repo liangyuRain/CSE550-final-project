@@ -21,7 +21,7 @@ public final class AMOApplication implements Application {
     private final Map<Address, AMOResult> executed = new HashMap<>();
 
     @Override
-    public AMOResult execute(Command command) {
+    public synchronized AMOResult execute(Command command) {
         assert command != null;
 
         if (!(command instanceof AMOCommand)) {
@@ -45,7 +45,7 @@ public final class AMOApplication implements Application {
         return result;
     }
 
-    public Result executeReadOnly(Command command) {
+    public synchronized Result executeReadOnly(Command command) {
         if (!command.readOnly()) {
             throw new IllegalArgumentException();
         }
@@ -57,7 +57,7 @@ public final class AMOApplication implements Application {
         return application.execute(command);
     }
 
-    public boolean alreadyExecuted(AMOCommand amoCommand) {
+    public synchronized boolean alreadyExecuted(AMOCommand amoCommand) {
         AMOResult result = executed.get(amoCommand.clientAddr());
         return result != null && amoCommand.sequenceNum() <= result.sequenceNum();
     }
