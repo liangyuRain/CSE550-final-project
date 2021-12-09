@@ -116,6 +116,9 @@ public class PaxosServer extends Node {
 
     private synchronized void handlePrepareReply(PrepareReply m, Address sender) {
         received(sender);
+        if (m.executed() != null) {
+            garbageCollect(m.executed().end(), sender);
+        }
         if (!leader.equals(address())) return;
         if (leaderRole == null) {
             leaderRole = new Leader();
@@ -143,16 +146,12 @@ public class PaxosServer extends Node {
                             // It is guaranteed in the protocol that the acceptor with highest accepted number is
                             // majority.
                             if (leaderRole.maxAcceptedNum.getMiddle().equals(address())) {
-                                if (execute(leaderRole.maxState.getLeft().commands, leaderRole.maxState.getLeft().begin)) {
-                                    leaderRole.maxState.getLeft().commands.forEach(leaderRole.pendingRequests::remove);
-                                }
-                                if (execute(leaderRole.maxState.getRight(), leaderRole.maxState.getLeft().end())) {
-                                    leaderRole.pendingRequests.removeAll(leaderRole.maxState.getRight());
-                                }
+                                execute(leaderRole.maxState.getLeft().commands, leaderRole.maxState.getLeft().begin);
+                                execute(leaderRole.maxState.getRight(), leaderRole.maxState.getLeft().end());
                             } else {
                                 // the leader issue the max accept number has crashed, and its accept request may only
                                 // be accepted by minority. Therefore, cannot directly execute the state.
-                                addUncertain(leaderRole.maxState.getLeft().commands, leaderRole.maxState.getLeft().begin);
+                                execute(leaderRole.maxState.getLeft().commands, leaderRole.maxState.getLeft().begin);
                                 addUncertain(leaderRole.maxState.getRight(), leaderRole.maxState.getLeft().end());
                             }
                             if (!leaderRole.pendingRequests.isEmpty()) {
@@ -183,9 +182,13 @@ public class PaxosServer extends Node {
                     if (m.maxProposalNum().compareTo(leaderRole.proposalNum) <= 0) {
                         if (leaderRole.noAcceptReply.size() < servers.length / 2.0) { // majority replied
                             for (AMOCommand c : uncertain) { // execute all commands in uncertain since majority replied
+                                if (app.alreadyExecuted(c)) {
+                                    throw new IllegalStateException(String.format(
+                                            "Slot %d command already executed: %s", this.executed.end(), c));
+                                }
                                 AMOResult result = app.execute(c);
                                 super.log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
-                                        this.executed.end(), c, result == null ? "null" : result));
+                                        this.executed.end(), c, result));
                                 executed.commands.add(c);
                                 send(new PaxosReply(leader, result), result.clientAddr()); // reply clients
                             }
@@ -206,6 +209,7 @@ public class PaxosServer extends Node {
 
     private synchronized void handlePrepareRequest(PrepareRequest m, Address sender) {
         received(sender);
+        garbageCollect(m.nextToExecute(), sender);
         if (!leader.equals(sender)) return;
         if (m.proposalNum().compareTo(acceptorRole.maxPrepareNum) >= 0) { // respond with promise
             acceptorRole.maxPrepareNum = m.proposalNum();
@@ -219,7 +223,7 @@ public class PaxosServer extends Node {
 
     private synchronized void handleAcceptRequest(AcceptRequest m, Address sender) {
         received(sender);
-        garbageCollect(m.nextToExecute(), sender);
+        garbageCollect(m.executed().end(), sender);
         if (!leader.equals(sender)) return;
         if (m.acceptNum().compareTo(acceptorRole.maxAcceptNum) >= 0) { // accept the request and sync with leader state
             acceptorRole.maxPrepareNum = ImmutablePair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
@@ -300,16 +304,13 @@ public class PaxosServer extends Node {
                 // prepare reply nor accept reply
                 broadcast(new PrepareRequest(ImmutablePair.of(leaderRole.proposalNum), executed.end()), senders);
             }
-            List<Address> aliveDests = leaderRole.noAcceptReply.stream()
+            leaderRole.noAcceptReply.stream()
                     .filter(alive::containsKey)
-                    .collect(Collectors.toList());
-            broadcast(new AcceptRequest(
-                    ImmutableTriple.of(leaderRole.proposalNum.left, leaderRole.proposalNum.right, leaderRole.acceptRound),
-                    executed.startFrom(aliveDests.stream()
-                            .map(serverExecuted::get)
-                            .min(Integer::compare)
-                            .orElse(Integer.MIN_VALUE)),
-                    uncertain, executed.end()), aliveDests);
+                    .forEach(addr -> send(new AcceptRequest(
+                            ImmutableTriple.of(
+                                    leaderRole.proposalNum.left, leaderRole.proposalNum.right, leaderRole.acceptRound),
+                            executed.startFrom(serverExecuted.get(addr)),
+                            uncertain), addr));
         } else {
             acceptTimeoutSet = false;
         }
@@ -378,10 +379,7 @@ public class PaxosServer extends Node {
                 set(prepareTimeout);
             }
             acceptorRole.maxPrepareNum = ImmutablePair.of(proposalNum);
-            broadcast(new PrepareRequest(ImmutablePair.of(proposalNum), executed.end()),
-                    noPrepareReply.stream()
-                            .filter(alive::containsKey)
-                            .collect(Collectors.toList()));
+            broadcast(new PrepareRequest(ImmutablePair.of(proposalNum), executed.end()), noPrepareReply);
         }
 
         void sendAccept() {
@@ -393,15 +391,12 @@ public class PaxosServer extends Node {
                 set(acceptTimeout);
             }
             acceptorRole.maxAcceptNum = ImmutableTriple.of(proposalNum.left, proposalNum.right, acceptRound);
-            List<Address> aliveDests = noAcceptReply.stream()
+            noAcceptReply.stream()
                     .filter(alive::containsKey)
-                    .collect(Collectors.toList());
-            broadcast(new AcceptRequest(ImmutableTriple.of(proposalNum.left, proposalNum.right, acceptRound),
-                    executed.startFrom(aliveDests.stream()
-                            .map(serverExecuted::get)
-                            .min(Integer::compare)
-                            .orElse(Integer.MIN_VALUE)),
-                    uncertain, executed.end()), aliveDests);
+                    .forEach(addr -> send(new AcceptRequest(
+                            ImmutableTriple.of(proposalNum.left, proposalNum.right, acceptRound),
+                            executed.startFrom(serverExecuted.get(addr)),
+                            uncertain), addr));
         }
 
     }
@@ -424,13 +419,9 @@ public class PaxosServer extends Node {
     @EqualsAndHashCode
     static class Slots implements Serializable, Copyable { // data structure to represents slots
 
-        ArrayDeque<AMOCommand> commands;
-        int begin; // the slot number of the first command
-
-        Slots() {
-            commands = new ArrayDeque<>();
-            begin = 0;
-        }
+        ArrayDeque<AMOCommand> commands = new ArrayDeque<>();
+        int begin = 0; // the slot number of the first command
+        boolean copied = false;
 
         int end() {
             return begin + commands.size();
@@ -451,8 +442,14 @@ public class PaxosServer extends Node {
                 return this;
             }
 
+            int end = end();
+            if (begin > end) {
+                begin = end;
+            }
+
             Slots s = new Slots();
             s.begin = begin;
+            s.copied = true;
             s.commands = this.commands.stream()
                     .skip(begin - this.begin)
                     .collect(Collectors.toCollection(ArrayDeque::new));
@@ -461,10 +458,15 @@ public class PaxosServer extends Node {
 
         @Override
         public Slots immutableCopy() {
-            Slots copy = new Slots();
-            this.commands.stream().map(AMOCommand::immutableCopy).forEach(copy.commands::add);
-            copy.begin = this.begin;
-            return copy;
+            if (this.copied) {
+                return this;
+            } else {
+                Slots copy = new Slots();
+                this.commands.stream().map(AMOCommand::immutableCopy).forEach(copy.commands::add);
+                copy.begin = this.begin;
+                copy.copied = true;
+                return copy;
+            }
         }
 
     }
@@ -479,35 +481,34 @@ public class PaxosServer extends Node {
     }
 
     // execute and record other sequence of commands without repeat using slot number
-    private boolean execute(Collection<AMOCommand> commands, int begin) {
+    private void execute(Collection<AMOCommand> commands, int begin) {
         if (this.executed.end() < begin + commands.size()) {
-            Iterator<AMOCommand> iter = commands.iterator();
-            for (int i = begin; i < executed.end(); ++i) {
-                iter.next();
-            }
-            while (iter.hasNext()) {
-                AMOCommand command = iter.next();
-                AMOResult result = app.execute(command);
-                super.log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
-                        this.executed.end(), command, result == null ? "null" : result));
-                executed.commands.add(command);
-            }
-            return true;
-        } else {
-            return false;
+            commands.stream()
+                    .skip(Math.max(executed.end() - begin, 0))
+                    .forEach(command -> {
+                        if (app.alreadyExecuted(command)) {
+                            throw new IllegalStateException(String.format(
+                                    "Slot %d command already executed: %s", this.executed.end(), command));
+                        }
+                        AMOResult result = app.execute(command);
+                        super.log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
+                                this.executed.end(), command, result));
+                        executed.commands.add(command);
+                        uncertain.remove(command);
+                        if (leaderRole != null) {
+                            leaderRole.pendingRequests.remove(command);
+                        }
+                    });
         }
     }
 
     private void addUncertain(Collection<AMOCommand> commands, int begin) {
         int end = executed.end() + uncertain.size();
         if (end < begin + commands.size()) {
-            Iterator<AMOCommand> iter = commands.iterator();
-            for (int i = begin; i < end; ++i) {
-                iter.next();
-            }
-            while (iter.hasNext()) {
-                uncertain.add(iter.next());
-            }
+            commands.stream()
+                    .skip(Math.max(end - begin, 0))
+                    .filter(((Predicate<AMOCommand>) app::alreadyExecuted).negate())
+                    .forEach(uncertain::add);
         }
     }
 

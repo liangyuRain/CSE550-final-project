@@ -86,7 +86,6 @@ class AcceptRequest implements Message {
     private final PaxosServer.Slots executed;
     @NonNull
     private final LinkedHashSet<AMOCommand> uncertain;
-    private final int nextToExecute;
 
     @Override
     public Level logLevel() {
@@ -100,8 +99,7 @@ class AcceptRequest implements Message {
                 executed.immutableCopy(),
                 uncertain.stream()
                         .map(AMOCommand::immutableCopy)
-                        .collect(Collectors.toCollection(LinkedHashSet::new)),
-                nextToExecute
+                        .collect(Collectors.toCollection(LinkedHashSet::new))
         );
     }
 
