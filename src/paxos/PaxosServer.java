@@ -530,15 +530,20 @@ public class PaxosServer extends Node {
 
     private void garbageCollect(int nextToExecute, Address sender) {
         int oldNum = serverExecuted.get(sender);
-        if (nextToExecute > oldNum && nextToExecute > executed.begin) {
+        if (nextToExecute > oldNum) {
             serverExecuted.put(sender, nextToExecute);
-            executed.gc(serverExecuted.values().stream().min(Integer::compare).get()); // garbage collect commands that
-            // every server has executed
+            if (nextToExecute > executed.begin) {
+                // garbage collect commands that every server has executed
+                executed.gc(serverExecuted.values().stream().min(Integer::compare).get());
+            }
         }
     }
 
     // execute and record other sequence of commands without repeat using slot number
     private void execute(Collection<AMOCommand> commands, int begin) {
+        if (begin > this.executed.end()) {
+            throw new IllegalStateException("Missing command");
+        }
         if (this.executed.end() < begin + commands.size()) {
             commands.stream()
                     .skip(Math.max(executed.end() - begin, 0))
