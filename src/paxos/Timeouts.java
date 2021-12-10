@@ -7,7 +7,7 @@ import java.util.logging.Level;
 
 @Data
 final class ClientTimeout implements Timeout {
-    private static final int CLIENT_RETRY_MILLIS = 1000;
+    private static final int CLIENT_RETRY_MILLIS = 100;
 
     private final AMOCommand command;
 
