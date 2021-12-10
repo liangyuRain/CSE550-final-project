@@ -81,11 +81,11 @@ public class PaxosServer extends Node {
 
     private void received(Address sender) {
         if (!alive.containsKey(sender)) {
-            super.log(Level.INFO, String.format("Server %s revived", sender.hostname()));
+            log(Level.INFO, String.format("Server %s revived", sender.hostname()));
         }
         if (sender.compareTo(leader) > 0) { // new leader found
             leader = sender;
-            super.log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
+            log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
         }
         if (!leader.equals(address())) {
             leaderRole = null;
@@ -207,7 +207,7 @@ public class PaxosServer extends Node {
                                             "Slot %d command already executed: %s", this.executed.end(), c));
                                 }
                                 AMOResult result = app.execute(c);
-                                super.log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
+                                log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
                                         this.executed.end(), c, result));
                                 executed.commands.add(c);
                                 send(new PaxosReply(leader, result), result.clientAddr()); // reply clients
@@ -269,7 +269,7 @@ public class PaxosServer extends Node {
             while (iter.hasNext()) { // check all servers' aliveness, optimized using iterator
                 Map.Entry<Address, Boolean> entry = iter.next();
                 if (!entry.getValue()) {
-                    super.log(Level.INFO, String.format("Server %s dead", entry.getKey().hostname()));
+                    log(Level.INFO, String.format("Server %s dead", entry.getKey().hostname()));
                     iter.remove();
                 } else {
                     entry.setValue(false);
@@ -280,7 +280,7 @@ public class PaxosServer extends Node {
                 for (int i = servers.length - 1; i >= 0; --i) {
                     if (alive.containsKey(servers[i])) {
                         leader = servers[i];
-                        super.log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
+                        log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
                         if (leader.equals(address())) {
                             leaderRole = new Leader();
                         }
@@ -512,7 +512,7 @@ public class PaxosServer extends Node {
                                     "Slot %d command already executed: %s", this.executed.end(), command));
                         }
                         AMOResult result = app.execute(command);
-                        super.log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
+                        log(Level.FINE, String.format("Executed slot %d with command %s, result: %s",
                                 this.executed.end(), command, result));
                         executed.commands.add(command);
                         uncertain.remove(command);
