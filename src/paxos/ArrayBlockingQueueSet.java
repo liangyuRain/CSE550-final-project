@@ -20,8 +20,8 @@ public class ArrayBlockingQueueSet<E> extends ArrayBlockingQueue<E> {
     private final HashMap<E, Long> map;
     private final ReentrantLock lock;
 
-    private volatile int count;
-    private volatile long totalDelay;
+    private int count;
+    private long totalDelay;
 
     public ArrayBlockingQueueSet(int capacity) throws NoSuchFieldException, IllegalAccessException {
         this(capacity, FullQueuePolicy.DISCARD_LATEST);
@@ -46,7 +46,8 @@ public class ArrayBlockingQueueSet<E> extends ArrayBlockingQueue<E> {
                 boolean res = super.offer(e);
                 if (!res) {
                     if (policy == FullQueuePolicy.DISCARD_OLDEST) {
-                        ignored = super.remove();
+                        ignored = super.poll();
+                        if (ignored == null) throw new NoSuchElementException();
                         map.remove(ignored);
                         super.add(e);
                         map.put(e, System.nanoTime());
@@ -72,6 +73,20 @@ public class ArrayBlockingQueueSet<E> extends ArrayBlockingQueue<E> {
                 map.put(e, System.nanoTime());
             }
             return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public E remove() {
+        lock.lock();
+        try {
+            E res = super.poll();
+            if (res == null) throw new NoSuchElementException();
+            count += 1;
+            totalDelay += System.nanoTime() - map.remove(res);
+            return res;
         } finally {
             lock.unlock();
         }
@@ -213,8 +228,10 @@ public class ArrayBlockingQueueSet<E> extends ArrayBlockingQueue<E> {
     public boolean remove(Object o) {
         lock.lock();
         try {
-            boolean res = super.remove(o);
-            if (res) map.remove(o);
+            boolean res = false;
+            if (map.remove(o) != null) {
+                res = super.remove(o);
+            }
             return res;
         } finally {
             lock.unlock();
