@@ -60,7 +60,7 @@ public class PaxosServer extends Node {
         this.alive = new HashMap<>();
         this.app = new AMOApplication(app);
         this.serverExecuted = new HashMap<>();
-        this.executed = new Slots();
+        this.executed = new Slots(new ArrayDeque<>(), 0, false);
         this.acceptorRole = new Acceptor();
     }
 
@@ -234,10 +234,10 @@ public class PaxosServer extends Node {
         if (m.proposalNum().compareTo(acceptorRole.maxPrepareNum) >= 0) { // respond with promise
             acceptorRole.maxPrepareNum = m.proposalNum();
             send(new PrepareReply(m.proposalNum(), executed.startFrom(serverExecuted.get(sender)), uncertain,
-                    acceptorRole.maxAcceptNum, acceptorRole.maxPrepareNum), sender);
+                    acceptorRole.maxAcceptNum, acceptorRole.maxPrepareNum, false), sender);
         } else { // reject
             send(new PrepareReply(m.proposalNum(), null, null,
-                    acceptorRole.maxAcceptNum, acceptorRole.maxPrepareNum), sender);
+                    acceptorRole.maxAcceptNum, acceptorRole.maxPrepareNum, false), sender);
         }
     }
 
@@ -329,8 +329,7 @@ public class PaxosServer extends Node {
                     .forEach(addr -> send(new AcceptRequest(
                             ImmutableTriple.of(
                                     leaderRole.proposalNum.left, leaderRole.proposalNum.right, leaderRole.acceptRound),
-                            executed.startFrom(serverExecuted.get(addr)),
-                            uncertain), addr));
+                            executed.startFrom(serverExecuted.get(addr)), uncertain, false), addr));
         } else {
             acceptTimeoutSet = false;
         }
@@ -415,8 +414,7 @@ public class PaxosServer extends Node {
                     .filter(alive::containsKey)
                     .forEach(addr -> send(new AcceptRequest(
                             ImmutableTriple.of(proposalNum.left, proposalNum.right, acceptRound),
-                            executed.startFrom(serverExecuted.get(addr)),
-                            uncertain), addr));
+                            executed.startFrom(serverExecuted.get(addr)), uncertain, false), addr));
         }
 
     }
@@ -437,11 +435,14 @@ public class PaxosServer extends Node {
 
     @ToString
     @EqualsAndHashCode
+    @AllArgsConstructor
     static class Slots implements Serializable, Copyable { // data structure to represents slots
 
-        ArrayDeque<AMOCommand> commands = new ArrayDeque<>();
-        int begin = 0; // the slot number of the first command
-        boolean copied = false;
+        ArrayDeque<AMOCommand> commands;
+        int begin; // the slot number of the first command
+
+        @EqualsAndHashCode.Exclude
+        final boolean copied;
 
         @ToString.Include
         int end() {
@@ -459,7 +460,11 @@ public class PaxosServer extends Node {
         }
 
         Slots startFrom(int begin) {
-            if (begin <= this.begin) {
+            return startFrom(begin, Integer.MAX_VALUE);
+        }
+
+        Slots startFrom(int begin, int maxSize) {
+            if (begin <= this.begin && commands.size() <= maxSize) {
                 return this;
             }
 
@@ -468,13 +473,13 @@ public class PaxosServer extends Node {
                 begin = end;
             }
 
-            Slots s = new Slots();
-            s.begin = begin;
-            s.copied = true;
-            s.commands = this.commands.stream()
-                    .skip(begin - this.begin)
-                    .collect(Collectors.toCollection(ArrayDeque::new));
-            return s;
+            // Assume AMOCommand itself is immutable
+            return new Slots(
+                    this.commands.stream()
+                            .skip(begin - this.begin)
+                            .limit(maxSize)
+                            .collect(Collectors.toCollection(ArrayDeque::new)),
+                    begin, true);
         }
 
         @Override
@@ -482,11 +487,8 @@ public class PaxosServer extends Node {
             if (this.copied) {
                 return this;
             } else {
-                Slots copy = new Slots();
-                this.commands.stream().map(AMOCommand::immutableCopy).forEach(copy.commands::add);
-                copy.begin = this.begin;
-                copy.copied = true;
-                return copy;
+                // Assume AMOCommand itself is immutable
+                return new Slots(new ArrayDeque<>(commands), this.begin, true);
             }
         }
 

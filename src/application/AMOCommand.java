@@ -1,18 +1,18 @@
 package application;
 
+import lombok.Value;
 import paxos.Address;
-import lombok.Data;
 
-@Data
-public final class AMOCommand implements Command {
+@Value
+public class AMOCommand implements Command {
 
-    private final Command command;
-    private final int sequenceNum;
-    private final Address clientAddr;
+    Command command;
+    int sequenceNum;
+    Address clientAddr;
 
     @Override
     public AMOCommand immutableCopy() {
-        return new AMOCommand(command.immutableCopy(), sequenceNum, clientAddr.immutableCopy());
+        return this;
     }
 
 }

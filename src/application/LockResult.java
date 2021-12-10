@@ -1,16 +1,14 @@
 package application;
 
-import lombok.Data;
-import lombok.Getter;
+import lombok.Value;
 
 import java.io.Serializable;
 
-@Data
+@Value
 public class LockResult implements Serializable, Result {
 
-    @Getter
-    private final boolean res;
-    private final long count;
+    boolean res;
+    long count;
 
     @Override
     public LockResult immutableCopy() {

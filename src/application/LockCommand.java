@@ -1,17 +1,17 @@
 package application;
 
-import lombok.Data;
+import lombok.Value;
 
 import java.io.Serializable;
 
-@Data
+@Value
 public class LockCommand implements Serializable, Command {
 
     public enum Operation {LOCK, UNLOCK}
 
-    private final Operation operation;
-    private final long locknum;
-    private final long signature;
+    Operation operation;
+    long locknum;
+    long signature;
 
     @Override
     public Command immutableCopy() {

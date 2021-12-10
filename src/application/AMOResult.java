@@ -1,18 +1,18 @@
 package application;
 
+import lombok.Value;
 import paxos.Address;
-import lombok.Data;
 
-@Data
-public final class AMOResult implements Result {
+@Value
+public class AMOResult implements Result {
 
-    private final Result result;
-    private final int sequenceNum;
-    private final Address clientAddr;
+    Result result;
+    int sequenceNum;
+    Address clientAddr;
 
     @Override
     public AMOResult immutableCopy() {
-        return new AMOResult(result.immutableCopy(), sequenceNum, clientAddr.immutableCopy());
+        return this;
     }
 
 }

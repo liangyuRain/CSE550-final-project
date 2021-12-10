@@ -1,18 +1,16 @@
 package paxos;
 
 import application.AMOCommand;
-import lombok.Data;
-import lombok.NonNull;
+import lombok.*;
 import org.apache.commons.lang3.tuple.*;
 
 import java.util.LinkedHashSet;
 import java.util.logging.Level;
-import java.util.stream.Collectors;
 
-@Data
+@Value
 class Ping implements Message {
 
-    private final int nextToExecute;
+    int nextToExecute;
 
     @Override
     public Level logLevel() {
@@ -26,12 +24,12 @@ class Ping implements Message {
 
 }
 
-@Data
+@Value
 class PrepareRequest implements Message {
 
     @NonNull
-    private final ImmutablePair<Integer, Address> proposalNum;
-    private final int nextToExecute;
+    ImmutablePair<Integer, Address> proposalNum;
+    int nextToExecute;
 
     @Override
     public Level logLevel() {
@@ -45,17 +43,20 @@ class PrepareRequest implements Message {
 
 }
 
-@Data
+@Value
 class PrepareReply implements Message { // success iff proposalNum >= maxProposalNum
 
     @NonNull
-    private final ImmutablePair<Integer, Address> proposalNum;
-    private final PaxosServer.Slots executed;
-    private final LinkedHashSet<AMOCommand> uncertain;
+    ImmutablePair<Integer, Address> proposalNum;
+    PaxosServer.Slots executed;
+    LinkedHashSet<AMOCommand> uncertain;
     @NonNull
-    private final ImmutableTriple<Integer, Address, Integer> maxAcceptNum;
+    ImmutableTriple<Integer, Address, Integer> maxAcceptNum;
     @NonNull
-    private final ImmutablePair<Integer, Address> maxProposalNum;
+    ImmutablePair<Integer, Address> maxProposalNum;
+
+    @EqualsAndHashCode.Exclude
+    boolean copied;
 
     @Override
     public Level logLevel() {
@@ -64,28 +65,31 @@ class PrepareReply implements Message { // success iff proposalNum >= maxProposa
 
     @Override
     public PrepareReply immutableCopy() {
+        if (copied) return this;
         return new PrepareReply(
                 proposalNum,
                 executed == null ? null : executed.immutableCopy(),
-                uncertain == null ? null : uncertain.stream()
-                        .map(AMOCommand::immutableCopy)
-                        .collect(Collectors.toCollection(LinkedHashSet::new)),
+                uncertain == null ? null : new LinkedHashSet<>(uncertain),
                 maxAcceptNum,
-                maxProposalNum
+                maxProposalNum,
+                true
         );
     }
 
 }
 
-@Data
+@Value
 class AcceptRequest implements Message {
 
     @NonNull
-    private final ImmutableTriple<Integer, Address, Integer> acceptNum;
+    ImmutableTriple<Integer, Address, Integer> acceptNum;
     @NonNull
-    private final PaxosServer.Slots executed;
+    PaxosServer.Slots executed;
     @NonNull
-    private final LinkedHashSet<AMOCommand> uncertain;
+    LinkedHashSet<AMOCommand> uncertain;
+
+    @EqualsAndHashCode.Exclude
+    boolean copied;
 
     @Override
     public Level logLevel() {
@@ -94,25 +98,25 @@ class AcceptRequest implements Message {
 
     @Override
     public AcceptRequest immutableCopy() {
+        if (copied) return this;
         return new AcceptRequest(
                 acceptNum,
                 executed.immutableCopy(),
-                uncertain.stream()
-                        .map(AMOCommand::immutableCopy)
-                        .collect(Collectors.toCollection(LinkedHashSet::new))
+                new LinkedHashSet<>(uncertain),
+                true
         );
     }
 
 }
 
-@Data
+@Value
 class AcceptReply implements Message { // success iff acceptNum >= maxProposalNum
 
     @NonNull
-    private final ImmutableTriple<Integer, Address, Integer> acceptNum;
+    ImmutableTriple<Integer, Address, Integer> acceptNum;
     @NonNull
-    private final ImmutablePair<Integer, Address> maxProposalNum;
-    private final int nextToExecute;
+    ImmutablePair<Integer, Address> maxProposalNum;
+    int nextToExecute;
 
     @Override
     public Level logLevel() {
@@ -126,10 +130,10 @@ class AcceptReply implements Message { // success iff acceptNum >= maxProposalNu
 
 }
 
-@Data
+@Value
 class TestAlive implements Message {
 
-    private final long timestamp; // System.nanoTime()
+    long timestamp; // System.nanoTime()
 
     @Override
     public Level logLevel() {
