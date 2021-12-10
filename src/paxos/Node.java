@@ -219,18 +219,16 @@ public class Node {
         }, delay, TimeUnit.MILLISECONDS);
     }
 
+    @AllArgsConstructor
     private class TimeoutTask implements Runnable {
 
         private final Timeout timeout;
 
-        public TimeoutTask(Timeout timeout) {
-            this.timeout = timeout;
-        }
-
         @Override
         public void run() {
+            log(timeout.logLevel(), String.format("Timeout triggered: %s ", timeout));
+            long start = System.nanoTime();
             try {
-                log(timeout.logLevel(), String.format("Timeout %s triggered", timeout));
                 Class<?> timeout_class = timeout.getClass();
                 try {
                     Method method = Node.this.getClass().getDeclaredMethod(
@@ -244,6 +242,8 @@ public class Node {
                 log(e);
                 System.exit(1);
             }
+            log(timeout.logLevel(), String.format(
+                    "Timeout handled with %.3f us: %s", (System.nanoTime() - start) / 1.0e3, timeout));
         }
 
     }
