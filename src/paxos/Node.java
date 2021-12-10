@@ -99,29 +99,15 @@ public class Node {
     }
 
     public void setLogLevel(Level level) {
-        this.logLevel = level;
+        LogHandler.logLevel = level;
     }
 
     protected void log(Level level, String s) {
-        if (level.intValue() >= this.logLevel.intValue()) {
-            LOG.info(String.format("[Node %s] %s", address().hostname(), s));
-        }
-    }
-
-    protected void log(Throwable e, String prefix) {
-        StringWriter sw = new StringWriter();
-        PrintWriter pw = new PrintWriter(sw);
-        sw.write(prefix);
-        e.printStackTrace(pw);
-        pw.write(' ');
-        pw.write(e.toString());
-        pw.flush();
-        this.log(Level.SEVERE, sw.toString());
-        pw.close();
+        logHandler.log(level, s);
     }
 
     protected void log(Throwable e) {
-        this.log(e, "");
+        logHandler.log(e);
     }
 
     protected void logConnectionPools() {
