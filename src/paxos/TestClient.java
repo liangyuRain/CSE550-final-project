@@ -18,14 +18,13 @@ public class TestClient {
     public static LongAdder count = new LongAdder();
 
     public static void main(String[] args) throws IOException, InterruptedException {
-        if (args.length < 1) {
-            System.out.println("Usage: java -jar test_client.jar [server ips config]");
-            System.out.println("Missing [server ips config]");
+        if (args.length < 2) {
+            System.out.println("Usage: java -jar test_client.jar [local IPv4 address] [server ips config]");
             System.exit(1);
         }
 
-        Address localAddr = Address.getLocalAddress();
-        Address[] addrs = Address.getServerAddresses(args[0]);
+        Address localAddr = Address.parseIPv4(args[0]);
+        Address[] addrs = Address.getServerAddresses(args[1]);
 
         long signature = new Random().nextLong();
 

@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.util.Random;
 import java.util.Scanner;
 import java.util.StringTokenizer;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.logging.Level;
 
 
@@ -21,11 +23,16 @@ public final class PaxosClient extends Node implements Client {
     private AMOResult result = null;
     private int seqNum = 0;
 
+    @Override
+    protected boolean PRINT_LOG_ESSENTIAL() {
+        return false;
+    }
+
     /* -------------------------------------------------------------------------
         Construction and Initialization
        -----------------------------------------------------------------------*/
     public PaxosClient(Address address, Address[] servers) throws IOException {
-        super(address);
+        super(address, (ThreadPoolExecutor) Executors.newCachedThreadPool(), 1);
         this.servers = servers;
     }
 
@@ -87,15 +94,15 @@ public final class PaxosClient extends Node implements Client {
     /* -------------------------------------------------------------------------
         Main Method
        -----------------------------------------------------------------------*/
+
     public static void main(String[] args) throws IOException, InterruptedException {
-        if (args.length < 1) {
-            System.out.println("Usage: java -jar paxos_client.jar [server ips config]");
-            System.out.println("Missing [server ips config]");
+        if (args.length < 2) {
+            System.out.println("Usage: java -jar paxos_client.jar [local IPv4 address] [server ips config]");
             System.exit(1);
         }
 
-        Address localAddr = Address.getLocalAddress();
-        Address[] addrs = Address.getServerAddresses(args[0]);
+        Address localAddr = Address.parseIPv4(args[0]);
+        Address[] addrs = Address.getServerAddresses(args[1]);
 
         long signature = new Random().nextLong();
 

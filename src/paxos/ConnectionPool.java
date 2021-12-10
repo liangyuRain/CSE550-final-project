@@ -6,6 +6,8 @@ import org.apache.commons.lang3.tuple.Pair;
 import java.io.*;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.util.ArrayList;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +25,24 @@ public class ConnectionPool {
 
     public static final int TEST_ALIVE_INTERVAL = 500; // millisecond
     public static final int TEST_ALIVE_TIMEOUT = 3 * TEST_ALIVE_INTERVAL;
+
+    public static int readPort(Socket skt) throws IOException {
+        int port = 0;
+        InputStream input = skt.getInputStream();
+        for (int i = 0; i < 2; ++i) {
+            int b = input.read();
+            if (b < 0) return -1;
+            port = (port << 8) | b;
+        }
+        return port;
+    }
+
+    public static void writePort(Socket skt, int port) throws IOException {
+        OutputStream output = skt.getOutputStream();
+        output.write(port >> 8);
+        output.write(port);
+        output.flush();
+    }
 
     private final Executor executor;
     private final BiConsumer<Message, Address> messageHandler;
@@ -69,6 +89,7 @@ public class ConnectionPool {
 
         if (!to.equals(address)) {
             executor.execute(new ConnectionCreationTask());
+            executor.execute(new ConnectionMonitorTask());
         }
     }
 
@@ -117,7 +138,7 @@ public class ConnectionPool {
                         log(Level.FINEST, "Creating connection");
                         Socket skt = new Socket();
                         skt.connect(to.inetSocketAddress(), CONNECTION_TIMEOUT);
-                        long id = addConnectionInternal(skt);
+                        long id = addConnectionInternal(skt, true);
                         if (id >= 0) {
                             log(Level.FINER, String.format("Created connection %s to %s", id, to.hostname()));
                         }
@@ -136,9 +157,39 @@ public class ConnectionPool {
 
     }
 
+    private class ConnectionMonitorTask implements Runnable {
+
+        @Override
+        public void run() {
+            try {
+                ArrayList<Long> timedOutConnections = new ArrayList<>();
+                for (; ; ) {
+                    long now = System.currentTimeMillis();
+                    for (Map.Entry<Long, Long> entry : lastReceival.entrySet()) {
+                        long id = entry.getKey();
+                        long timestamp = entry.getValue();
+                        if (now - timestamp > TEST_ALIVE_TIMEOUT) {
+                            log(Level.SEVERE, String.format("Connection %d not alive", id));
+                            timedOutConnections.add(id);
+                        }
+                    }
+                    synchronized (connections) {
+                        timedOutConnections.forEach(ConnectionPool.this::closeConnection);
+                    }
+                    timedOutConnections.clear();
+                    Thread.sleep(TEST_ALIVE_INTERVAL);
+                }
+            } catch (Throwable e) {
+                log(e);
+                System.exit(1);
+            }
+        }
+
+    }
+
     public void addConnection(Socket skt) {
         try {
-            long id = addConnectionInternal(skt);
+            long id = addConnectionInternal(skt, false);
             if (id >= 0) {
                 log(Level.FINER, String.format("Added connection %d from %s", id, to.hostname()));
             }
@@ -148,7 +199,7 @@ public class ConnectionPool {
         }
     }
 
-    private long addConnectionInternal(Socket skt) {
+    private long addConnectionInternal(Socket skt, boolean writePortFirst) {
         log(Level.FINEST, String.format("Adding connection %s", skt));
         if (to.equals(address)) {
             throw new IllegalStateException("Cannot add connection to self");
@@ -163,7 +214,7 @@ public class ConnectionPool {
             connections.put(id, skt);
         }
         lastReceival.put(id, System.currentTimeMillis());
-        executor.execute(new SendTask(id, logHandler));
+        executor.execute(new SendTask(id, writePortFirst, logHandler));
         executor.execute(new ReceiveTask(id, logHandler));
         log(Level.FINEST, String.format(
                 "%s added as connection %d; Active connection to %s: %d",
@@ -221,10 +272,12 @@ public class ConnectionPool {
     private class SendTask implements Runnable {
 
         private final long id;
+        private final boolean writePortFirst;
         private final LogHandler logHandler;
 
-        public SendTask(long id, LogHandler logHandler) {
+        public SendTask(long id, boolean writePortFirst, LogHandler logHandler) {
             this.id = id;
+            this.writePortFirst = writePortFirst;
             this.logHandler = logHandler.derivative(String.format("[Connection %d] [Send]", id));
         }
 
@@ -241,54 +294,42 @@ public class ConnectionPool {
             try {
                 Socket skt = connections.get(id);
                 if (skt == null) return;
-                ObjectOutputStream sktOutput;
                 try {
-                    sktOutput = new ObjectOutputStream(new BufferedOutputStream(skt.getOutputStream()));
+                    if (writePortFirst) writePort(skt, address.inetSocketAddress().getPort());
+                    try (ObjectOutputStream sktOutput =
+                                 new ObjectOutputStream(new BufferedOutputStream(skt.getOutputStream()))) {
+                        for (; ; ) {
+                            log(Level.FINEST, "Waiting for new package");
+                            Package pkg = outboundPackages.poll(TEST_ALIVE_INTERVAL, TimeUnit.MILLISECONDS);
+                            if (!connections.containsKey(id)) {
+                                log(Level.SEVERE, "Connection has been closed");
+                                return;
+                            }
+                            if (pkg != null) {
+                                log(Level.FINEST, String.format(
+                                        "Package dequeued; Queue size: %d; Dequeued package: %s",
+                                        outboundPackages.size(), pkg));
+                            } else {
+                                pkg = new Package(address, new TestAlive(System.nanoTime()));
+                            }
+                            try {
+                                sktOutput.writeObject(pkg);
+                                sktOutput.reset();
+                                sktOutput.flush();
+                                log(pkg.message().logLevel(), String.format("Sent package %s", pkg));
+                                if (!(pkg.message() instanceof TestAlive)) {
+                                    outPkgCounter.increment();
+                                }
+                            } catch (IOException e) {
+                                log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg));
+                                return;
+                            }
+                        }
+                    }
                 } catch (IOException e) {
                     log(Level.SEVERE, String.format("Constructing ObjectOutputStream failed with %s", e));
+                } finally {
                     closeConnection(id);
-                    return;
-                }
-                for (; ; ) {
-                    log(Level.FINEST, "Waiting for new package");
-                    Package pkg = outboundPackages.poll(TEST_ALIVE_INTERVAL, TimeUnit.MILLISECONDS);
-                    if (!connections.containsKey(id)) {
-                        log(Level.SEVERE, "Connection has been closed");
-                        return;
-                    }
-                    if (System.currentTimeMillis() - lastReceival.get(id) > TEST_ALIVE_TIMEOUT) {
-                        log(Level.SEVERE, "Connection not alive");
-                        try {
-                            sktOutput.close();
-                        } catch (IOException ignored) {
-                        }
-                        closeConnection(id);
-                        return;
-                    }
-                    if (pkg != null) {
-                        log(Level.FINEST, String.format(
-                                "Package dequeued; Queue size: %d; Dequeued package: %s",
-                                outboundPackages.size(), pkg));
-                    } else {
-                        pkg = new Package(address, new TestAlive(System.nanoTime()));
-                    }
-                    try {
-                        sktOutput.writeObject(pkg);
-                        sktOutput.reset();
-                        sktOutput.flush();
-                        log(pkg.message().logLevel(), String.format("Sent package %s", pkg));
-                        if (!(pkg.message() instanceof TestAlive)) {
-                            outPkgCounter.increment();
-                        }
-                    } catch (IOException e) {
-                        log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg));
-                        try {
-                            sktOutput.close();
-                        } catch (IOException ignored) {
-                        }
-                        closeConnection(id);
-                        return;
-                    }
                 }
             } catch (Throwable e) {
                 log(e);
@@ -320,39 +361,33 @@ public class ConnectionPool {
             try {
                 Socket skt = connections.get(id);
                 if (skt == null) return;
-                ObjectInputStream sktInput;
-                try {
-                    sktInput = new ObjectInputStream(new BufferedInputStream(skt.getInputStream()));
+                try (ObjectInputStream sktInput =
+                             new ObjectInputStream(new BufferedInputStream(skt.getInputStream()))) {
+                    for (; ; ) {
+                        Package pkg;
+                        try {
+                            pkg = (Package) sktInput.readObject();
+                        } catch (ClassNotFoundException | IOException e) {  // Incomplete package?
+                            log(Level.SEVERE, String.format("Receive failed with %s", e));
+                            return;
+                        }
+                        lastReceival.put(id, System.currentTimeMillis());
+                        Message message = pkg.message();
+                        Address sender = pkg.sender();
+                        log(message.logLevel(), String.format("Got package from %s: %s", sender.hostname(), pkg));
+                        if (!(message instanceof TestAlive)) {
+                            messageHandler.accept(message, sender);
+                            inPkgCounter.increment();
+                        }
+                        if (!connections.containsKey(id)) {
+                            log(Level.SEVERE, "Connection has been closed");
+                            return;
+                        }
+                    }
                 } catch (IOException e) {
                     log(Level.SEVERE, String.format("Constructing ObjectInputStream failed with %s", e));
+                } finally {
                     closeConnection(id);
-                    return;
-                }
-                for (; ; ) {
-                    Package pkg;
-                    try {
-                        pkg = (Package) sktInput.readObject();
-                    } catch (ClassNotFoundException | IOException e) {  // Incomplete package?
-                        log(Level.SEVERE, String.format("Receive failed with %s", e));
-                        try {
-                            sktInput.close();
-                        } catch (IOException ignored) {
-                        }
-                        closeConnection(id);
-                        return;
-                    }
-                    lastReceival.put(id, System.currentTimeMillis());
-                    Message message = pkg.message();
-                    Address sender = pkg.sender();
-                    log(message.logLevel(), String.format("Got package from %s: %s", sender.hostname(), pkg));
-                    if (!(message instanceof TestAlive)) {
-                        messageHandler.accept(message, sender);
-                        inPkgCounter.increment();
-                    }
-                    if (!connections.containsKey(id)) {
-                        log(Level.SEVERE, "Connection has been closed");
-                        return;
-                    }
                 }
             } catch (Throwable e) {
                 log(e);

@@ -8,6 +8,8 @@ import org.apache.commons.lang3.tuple.*;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.*;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
@@ -16,6 +18,10 @@ import java.util.stream.Collectors;
 @ToString(callSuper = true)
 @EqualsAndHashCode(callSuper = true)
 public class PaxosServer extends Node {
+
+    private static final int MESSAGE_HANDLER_EXECUTOR_NUM_OF_THREAD = 20;
+    private static final int MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE = 100;
+
     private final Address[] servers;
 
     private Address leader; // current leader address
@@ -41,8 +47,14 @@ public class PaxosServer extends Node {
     /* -------------------------------------------------------------------------
         Construction and Initialization
        -----------------------------------------------------------------------*/
-    public PaxosServer(Address address, Address[] servers, Application app) throws IOException {
-        super(address);
+    public PaxosServer(Address address, Address[] servers, Application app)
+            throws IOException, NoSuchFieldException, IllegalAccessException {
+        super(address,
+                new ThreadPoolExecutor(MESSAGE_HANDLER_EXECUTOR_NUM_OF_THREAD,
+                        MESSAGE_HANDLER_EXECUTOR_NUM_OF_THREAD, 0, TimeUnit.MILLISECONDS,
+                        new ArrayBlockingQueueSet<>(MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE),
+                        new ThreadPoolExecutor.DiscardPolicy()),
+                10);
         this.servers = servers;
 
         this.alive = new HashMap<>();
@@ -92,6 +104,14 @@ public class PaxosServer extends Node {
     private synchronized void handlePing(Ping m, Address sender) {
         received(sender);
         garbageCollect(m.nextToExecute(), sender);
+    }
+
+    @Override
+    protected boolean messageFilter(Message message, Address sender) {
+        if (message instanceof PaxosRequest) {
+            return messageHandlerExecutor.getQueue().remainingCapacity() > MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE / 2;
+        }
+        return true;
     }
 
     private synchronized void handlePaxosRequest(PaxosRequest m, Address sender) {
@@ -517,15 +537,14 @@ public class PaxosServer extends Node {
         Main Method
        -----------------------------------------------------------------------*/
 
-    public static void main(String[] args) throws IOException {
-        if (args.length < 1) {
-            System.out.println("Usage: java -jar paxos_server.jar [server ips config]");
-            System.out.println("Missing [server ips config]");
+    public static void main(String[] args) throws IOException, NoSuchFieldException, IllegalAccessException {
+        if (args.length < 2) {
+            System.out.println("Usage: java -jar paxos_server.jar [local IPv4 address] [server ips config]");
             System.exit(1);
         }
 
-        Address localAddr = Address.getLocalAddress();
-        Address[] addrs = Address.getServerAddresses(args[0]);
+        Address localAddr = Address.parseIPv4(args[0]);
+        Address[] addrs = Address.getServerAddresses(args[1]);
         PaxosServer server = new PaxosServer(localAddr, addrs, new LockApplication());
         server.setLogLevel(Level.FINER);
         server.init();
