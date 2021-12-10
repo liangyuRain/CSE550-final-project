@@ -79,8 +79,6 @@ public final class PaxosClient extends Node implements Client {
        -----------------------------------------------------------------------*/
     private synchronized void onClientTimeout(ClientTimeout t) {
         if (t.command().equals(currentCommand) && result == null) {
-            System.out.printf("[%s] Command %s timeout%n", address().hostname(), currentCommand);
-
             broadcast(new PaxosRequest(currentCommand), servers);
             set(t);
         }
@@ -109,6 +107,10 @@ public final class PaxosClient extends Node implements Client {
         Scanner console = new Scanner(System.in);
         for (; ; ) {
             System.out.print("> ");
+
+            if (!console.hasNextLine()) {
+                return;
+            }
 
             String line = console.nextLine();
             StringTokenizer st = new StringTokenizer(line);
