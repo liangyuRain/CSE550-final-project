@@ -124,9 +124,12 @@ public class Node {
     protected final void broadcast(Message message, Address[] to) {
         if (to.length > 0) {
             log(message.logLevel(), String.format("Broadcast %s to %s", message, Arrays.toString(to)));
+            Message copy = message.immutableCopy();
             for (Address addr : to) {
-                send(message, addr);
+                send(copy, addr);
             }
+        } else {
+            log(Level.FINEST, String.format("Broadcast ignored because of empty destination: %s", message));
         }
     }
 
