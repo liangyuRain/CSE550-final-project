@@ -423,6 +423,7 @@ public class PaxosServer extends Node {
         int begin = 0; // the slot number of the first command
         boolean copied = false;
 
+        @ToString.Include
         int end() {
             return begin + commands.size();
         }
