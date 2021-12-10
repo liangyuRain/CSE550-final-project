@@ -1,6 +1,7 @@
 package paxos;
 
 import application.*;
+import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
 import org.apache.commons.lang3.tuple.*;
@@ -22,7 +23,10 @@ public class PaxosServer extends Node {
     private static final int MESSAGE_HANDLER_EXECUTOR_NUM_OF_THREAD = 20;
     private static final int MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE = 100;
 
+    private static final int MAX_NUM_OF_COMMAND_PER_MESSAGE = 10000;
+
     private final Address[] servers;
+    private final int selfIndex;
 
     private Address leader; // current leader address
     private final Map<Address, Boolean> alive; // alive server same as lab2
@@ -56,6 +60,11 @@ public class PaxosServer extends Node {
                         new ThreadPoolExecutor.DiscardPolicy()),
                 10);
         this.servers = servers;
+        Arrays.sort(this.servers); // convenient for choosing highest address leader
+        this.selfIndex = Arrays.binarySearch(this.servers, address());
+        if (this.selfIndex == -1) {
+            throw new IllegalStateException("Servers array must contain itself");
+        }
 
         this.alive = new HashMap<>();
         this.app = new AMOApplication(app);
@@ -68,7 +77,6 @@ public class PaxosServer extends Node {
     public void init() {
         super.init();
         Address thisAddr = address();
-        Arrays.sort(servers); // convenient for choosing highest address leader
         for (Address addr : servers) {
             if (!addr.equals(thisAddr)) {
                 serverExecuted.put(addr, 0);
@@ -83,7 +91,8 @@ public class PaxosServer extends Node {
         if (!alive.containsKey(sender)) {
             log(Level.INFO, String.format("Server %s revived", sender.hostname()));
         }
-        if (sender.compareTo(leader) > 0) { // new leader found
+        if (sender.compareTo(leader) > 0 && isUpToDate(sender)) {
+            // new leader found
             leader = sender;
             log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
         }
@@ -98,12 +107,25 @@ public class PaxosServer extends Node {
         alive.put(sender, true);
     }
 
+    private boolean isUpToDate(Address sender) {
+        if (sender.equals(address())) {
+            return true;
+        } else {
+            return serverExecuted.get(sender) >= executed.end() - MAX_NUM_OF_COMMAND_PER_MESSAGE;
+        }
+    }
+
     /* -------------------------------------------------------------------------
         Message Handlers
        -----------------------------------------------------------------------*/
     private synchronized void handlePing(Ping m, Address sender) {
         received(sender);
         garbageCollect(m.nextToExecute(), sender);
+    }
+
+    private synchronized void handleRecover(Recover m, Address sender) {
+        received(sender);
+        execute(m.executed().commands, m.executed().begin);
     }
 
     @Override
@@ -231,6 +253,7 @@ public class PaxosServer extends Node {
         received(sender);
         garbageCollect(m.nextToExecute(), sender);
         if (!leader.equals(sender)) return;
+        if (!isUpToDate(sender)) return;
         if (m.proposalNum().compareTo(acceptorRole.maxPrepareNum) >= 0) { // respond with promise
             acceptorRole.maxPrepareNum = m.proposalNum();
             send(new PrepareReply(m.proposalNum(), executed.startFrom(serverExecuted.get(sender)), uncertain,
@@ -276,9 +299,10 @@ public class PaxosServer extends Node {
                 }
             }
             alive.put(address(), true);
-            if (!alive.containsKey(leader)) { // leader no longer alive, choose next highest alive address
+            if (!alive.containsKey(leader) || !isUpToDate(leader)) {
+                // leader no longer alive or too stale, choose highest alive up-to-date address
                 for (int i = servers.length - 1; i >= 0; --i) {
-                    if (alive.containsKey(servers[i])) {
+                    if (alive.containsKey(servers[i]) && isUpToDate(servers[i])) {
                         leader = servers[i];
                         log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
                         if (leader.equals(address())) {
@@ -288,6 +312,16 @@ public class PaxosServer extends Node {
                     }
                 }
             }
+            for (int i = (selfIndex + 1) % servers.length; i != selfIndex; i = (i + 1) % servers.length) {
+                if (alive.containsKey(servers[i])) {
+                    int serverEnd = serverExecuted.get(servers[i]);
+                    if (serverEnd < executed.end() - MAX_NUM_OF_COMMAND_PER_MESSAGE / 10) {
+                        send(new Recover(executed.startFrom(
+                                serverEnd, MAX_NUM_OF_COMMAND_PER_MESSAGE), false), servers[i]);
+                    }
+                    break;
+                }
+            }
         }
         check = !check;
         set(t);
@@ -295,8 +329,7 @@ public class PaxosServer extends Node {
     }
 
     private synchronized void onPrepareRequestTimeout(PrepareRequestTimeout t) {
-        if (leader.equals(address()) && !leaderRole.pendingRequests.isEmpty() &&
-                leaderRole.noPrepareReply != null &&
+        if (leader.equals(address()) && leaderRole.noPrepareReply != null &&
                 leaderRole.noPrepareReply.size() >= servers.length / 2.0) {
             set(t);
             List<Address> aliveDests = leaderRole.noPrepareReply.stream()
@@ -309,8 +342,7 @@ public class PaxosServer extends Node {
     }
 
     private synchronized void onAcceptRequestTimeout(AcceptRequestTimeout t) {
-        if (leader.equals(address()) && !uncertain.isEmpty() &&
-                leaderRole.noPrepareReply != null &&
+        if (leader.equals(address()) && leaderRole.noPrepareReply != null &&
                 leaderRole.noPrepareReply.size() < servers.length / 2.0 &&
                 leaderRole.noAcceptReply != null &&
                 leaderRole.noAcceptReply.size() >= servers.length / 2.0) {
@@ -326,6 +358,7 @@ public class PaxosServer extends Node {
             }
             leaderRole.noAcceptReply.stream()
                     .filter(alive::containsKey)
+                    .filter(this::isUpToDate)
                     .forEach(addr -> send(new AcceptRequest(
                             ImmutableTriple.of(
                                     leaderRole.proposalNum.left, leaderRole.proposalNum.right, leaderRole.acceptRound),
@@ -412,6 +445,7 @@ public class PaxosServer extends Node {
             acceptorRole.maxAcceptNum = ImmutableTriple.of(proposalNum.left, proposalNum.right, acceptRound);
             noAcceptReply.stream()
                     .filter(alive::containsKey)
+                    .filter(PaxosServer.this::isUpToDate)
                     .forEach(addr -> send(new AcceptRequest(
                             ImmutableTriple.of(proposalNum.left, proposalNum.right, acceptRound),
                             executed.startFrom(serverExecuted.get(addr)), uncertain, false), addr));

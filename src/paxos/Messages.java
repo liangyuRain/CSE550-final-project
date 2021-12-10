@@ -146,3 +146,25 @@ class TestAlive implements Message {
     }
 
 }
+
+@Value
+class Recover implements Message {
+
+    @NonNull
+    PaxosServer.Slots executed;
+
+    @EqualsAndHashCode.Exclude
+    boolean copied;
+
+    @Override
+    public Level logLevel() {
+        return Level.FINER;
+    }
+
+    @Override
+    public Recover immutableCopy() {
+        if (copied) return this;
+        return new Recover(executed.immutableCopy(), true);
+    }
+
+}
