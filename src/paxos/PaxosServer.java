@@ -649,11 +649,11 @@ public class PaxosServer extends Node {
         double avgTimeCost = (timestamp - lastTimeStamp) / 1.0e6 / (executeEnd - lastExecuteEnd);
         sb.append(
                 String.format("Paxos info: Executed: %d, Throughput: %.3f, " +
-                                "Num of commands in memory: %d, Avg time cost: %.3f ms%n" +
-                                "Alive: [%s]%n" +
-                                "Executed: {%s}%n" +
+                                "Avg time cost: %.3f ms, Num of commands in memory: %d%n" +
+                                "Server Alive: [%s]%n" +
+                                "Server Executed: %n{%s}%n" +
                                 "Leader: %s",
-                        executeEnd, throughput, numOfSlotsInMemory, avgTimeCost,
+                        executeEnd, throughput, avgTimeCost, numOfSlotsInMemory,
                         alive.keySet().stream()
                                 .sorted()
                                 .map(Address::hostname)

@@ -266,11 +266,8 @@ public class Node {
         long totalQueueDelay = 0;
         long totalQueueCount = 0;
 
-        sb.append(String.format("[%s] Log Essential:", address.hostname()));
-        sb.append(System.lineSeparator());
-        sb.append(String.format("Time: %s", LogHandler.TIME_FORMATTER.format(LocalDateTime.now())));
-        sb.append(System.lineSeparator());
-        sb.append("ConnectionPools:");
+        sb.append(String.format("[%s] [%s] Log Essential:",
+                LogHandler.TIME_FORMATTER.format(LocalDateTime.now()), address.hostname()));
         sb.append(System.lineSeparator());
         for (Map.Entry<Address, ConnectionPool> entry :
                 addrToConn.entrySet().stream()
@@ -278,9 +275,7 @@ public class Node {
                         .collect(Collectors.toList())) {
             Address addr = entry.getKey();
             ConnectionPool.ConnectionPoolStat connPoolStat = entry.getValue().getConnectionPoolStat();
-            sb.append(String.format(
-                    "Address: %s%nNum of conn: %d, PkgQueue size: %d",
-                    addr.hostname(), connPoolStat.numOfConnections, connPoolStat.packageQueueSize));
+            sb.append(String.format("(%s): Num of conn: %d", addr.hostname(), connPoolStat.numOfConnections));
 
             ConnectionPool.ConnectionPoolStat lastRecord = lastConnPoolStats.get(addr);
             int lastQueueCount = 0;
@@ -294,7 +289,7 @@ public class Node {
                 double inThroughput = (connPoolStat.inPkgCounter - lastRecord.inPkgCounter) * 1.0e9 /
                         (connPoolStat.timestamp - lastRecord.timestamp);
                 sb.append(String.format(
-                        ", Send throughput: %.3f, Receive throughput: %.3f", outThroughput, inThroughput));
+                        ", Send throughput: %.3f, Recv throughput: %.3f", outThroughput, inThroughput));
 
                 totalOutThroughput += outThroughput;
                 totalInThroughput += inThroughput;
@@ -311,9 +306,10 @@ public class Node {
             sb.append(System.lineSeparator());
         }
         sb.append(String.format(
-                "Total send throughput: %.3f, Total receive throughput: %.3f, " +
+                "Total send throughput: %.3f, Total recv throughput: %.3f, " +
                         "Overall avg queue delay: %.3f us",
                 totalOutThroughput, totalInThroughput, totalQueueDelay / 1.0e3 / totalQueueCount));
+        sb.append(System.lineSeparator());
         sb.append(System.lineSeparator());
 
         sb.append(logThreadPool.apply(scheduledExecutor, "ScheduledExecutor"));
