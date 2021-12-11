@@ -4,13 +4,19 @@ import application.AMOCommand;
 import lombok.*;
 import org.apache.commons.lang3.tuple.*;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.logging.Level;
 
 @Value
 class Ping implements Message {
 
-    int nextToExecute;
+    @NonNull
+    List<ImmutablePair<Address, Integer>> serverExecuted;
+
+    @EqualsAndHashCode.Exclude
+    boolean copied;
 
     @Override
     public Level logLevel() {
@@ -19,7 +25,8 @@ class Ping implements Message {
 
     @Override
     public Ping immutableCopy() {
-        return this;
+        if (copied) return this;
+        return new Ping(new ArrayList<>(serverExecuted), true);
     }
 
 }
@@ -152,6 +159,7 @@ class Recover implements Message {
 
     @NonNull
     PaxosServer.Slots executed;
+    int nextToExecute;
 
     @EqualsAndHashCode.Exclude
     boolean copied;
@@ -164,7 +172,7 @@ class Recover implements Message {
     @Override
     public Recover immutableCopy() {
         if (copied) return this;
-        return new Recover(executed.immutableCopy(), true);
+        return new Recover(executed.immutableCopy(), nextToExecute, true);
     }
 
 }

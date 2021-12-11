@@ -24,6 +24,7 @@ public class PaxosServer extends Node {
     private static final int MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE = 100;
 
     private static final int MAX_NUM_OF_COMMAND_PER_MESSAGE = 10000;
+    private static final int MAX_NUM_OF_COMMAND_IN_MEMORY = 1048576; // 2^20
 
     private final Address[] servers;
     private final int selfIndex;
@@ -90,7 +91,7 @@ public class PaxosServer extends Node {
     }
 
     private void received(Address sender) {
-        if (!alive.containsKey(sender)) {
+        if (alive.put(sender, true) == null) {
             log(Level.INFO, String.format("Server %s revived", sender.hostname()));
         }
         if (sender.compareTo(leader) > 0 && isUpToDate(sender)) {
@@ -106,15 +107,6 @@ public class PaxosServer extends Node {
                 }
             }
         }
-        if (!leader.equals(address())) {
-            leaderRole = null;
-            if (acceptorRole.maxAcceptNum.equals(prevAcceptorAcceptedNum)) { // restore acceptor state after demotion
-                uncertain = prevAcceptorState.getRight();
-                prevAcceptorAcceptedNum = null;
-                prevAcceptorState = null;
-            }
-        }
-        alive.put(sender, true);
     }
 
     private boolean isUpToDate(Address sender) {
@@ -129,8 +121,27 @@ public class PaxosServer extends Node {
         Message Handlers
        -----------------------------------------------------------------------*/
     private synchronized void handlePing(Ping m, Address sender) {
-        received(sender);
-        garbageCollect(m.nextToExecute(), sender);
+        if (alive.put(sender, true) == null) {
+            log(Level.INFO, String.format("Server %s revived", sender.hostname()));
+        }
+        int minNum = Integer.MAX_VALUE;
+        for (Map.Entry<Address, Integer> entry : m.serverExecuted()) {
+            Address server = entry.getKey();
+            int serverEnd = entry.getValue();
+
+            if (server.equals(address())) continue;
+            if (serverEnd < minNum) minNum = serverEnd;
+
+            int oldNum = serverExecuted.get(server);
+            if (serverEnd > oldNum) {
+                serverExecuted.put(server, serverEnd);
+                if (serverEnd > maxServerExecuted) {
+                    maxServerExecuted = serverEnd;
+                }
+            }
+        }
+        executed.gc(minNum);
+        electLeader();
     }
 
     private synchronized void handleRecover(Recover m, Address sender) {
@@ -145,6 +156,9 @@ public class PaxosServer extends Node {
 
     @Override
     protected boolean messageFilter(Message message, Address sender) {
+        if (executed.commands.size() > MAX_NUM_OF_COMMAND_IN_MEMORY - MAX_NUM_OF_COMMAND_PER_MESSAGE) {
+            return message instanceof Ping;
+        }
         if (message instanceof PaxosRequest) {
             return leader.equals(address()) &&
                     messageHandlerExecutor.getQueue().remainingCapacity() > MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE / 2;
@@ -331,13 +345,16 @@ public class PaxosServer extends Node {
                 }
             }
         }
-        check = !check;
+        List<ImmutablePair<Address, Integer>> l = serverExecuted.entrySet().stream()
+                .map(ImmutablePair::of)
+                .collect(Collectors.toList());
+        l.add(ImmutablePair.of(address(), executed.end()));
+        broadcast(new Ping(l, true), serverExecuted.keySet()); // broadcast ping message
         set(t);
-        broadcast(new Ping(executed.end()), serverExecuted.keySet()); // broadcast ping message
     }
 
     private synchronized void onPrepareRequestTimeout(PrepareRequestTimeout t) {
-        if (leader.equals(address()) && leaderRole.noPrepareReply != null &&
+        if (leader.equals(address()) && leaderRole != null && leaderRole.noPrepareReply != null &&
                 leaderRole.noPrepareReply.size() >= servers.length / 2.0) {
             set(t);
             List<Address> aliveDests = leaderRole.noPrepareReply.stream()
@@ -350,7 +367,7 @@ public class PaxosServer extends Node {
     }
 
     private synchronized void onAcceptRequestTimeout(AcceptRequestTimeout t) {
-        if (leader.equals(address()) && leaderRole.noPrepareReply != null &&
+        if (leader.equals(address()) && leaderRole != null && leaderRole.noPrepareReply != null &&
                 leaderRole.noPrepareReply.size() < servers.length / 2.0 &&
                 leaderRole.noAcceptReply != null &&
                 leaderRole.noAcceptReply.size() >= servers.length / 2.0) {
