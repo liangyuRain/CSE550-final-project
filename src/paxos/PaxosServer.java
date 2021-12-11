@@ -592,4 +592,58 @@ public class PaxosServer extends Node {
         server.listen();
     }
 
+    /* -------------------------------------------------------------------------
+        Log
+       -----------------------------------------------------------------------*/
+
+    private int lastExecuteEnd = 0;
+    private long lastTimeStamp = System.nanoTime();
+
+    @Override
+    protected void logEssential(StringBuilder sb) {
+        super.logEssential(sb);
+        sb.append(System.lineSeparator());
+
+        int executeEnd;
+        int numOfSlotsInMemory;
+        HashMap<Address, Integer> serverExecutedCopy;
+        synchronized (this) {
+            executeEnd = executed.end();
+            numOfSlotsInMemory = executed.commands.size();
+            serverExecutedCopy = new HashMap<>(serverExecuted);
+        }
+
+        long timestamp = System.nanoTime();
+        double throughput = (executeEnd - lastExecuteEnd) * 1.0e9 / (timestamp - lastTimeStamp);
+        double avgTimeCost = (timestamp - lastTimeStamp) / 1.0e6 / (executeEnd - lastExecuteEnd);
+        sb.append(
+                String.format("Paxos info: Executed: %d, Throughput: %.3f, " +
+                                "Num of commands in memory: %d, Avg time cost: %.3f ms%n" +
+                                "Alive: [%s]%n" +
+                                "Executed: {%s}%n" +
+                                "Leader: %s",
+                        executeEnd, throughput, numOfSlotsInMemory, avgTimeCost,
+                        alive.keySet().stream()
+                                .sorted()
+                                .map(Address::hostname)
+                                .reduce((s1, s2) -> String.join(", ", s1, s2))
+                                .orElse(""),
+                        serverExecutedCopy.entrySet().stream()
+                                .sorted(Map.Entry.comparingByKey())
+                                .map(entry -> String.format(
+                                        "(%s): %s", entry.getKey().hostname(), entry.getValue()))
+                                .reduce((s1, s2) -> String.join(", ", s1, s2))
+                                .get(),
+                        leader.hostname())
+        );
+
+        if (executed.commands.size() > MAX_NUM_OF_COMMAND_IN_MEMORY - MAX_NUM_OF_COMMAND_PER_MESSAGE) {
+            sb.append(System.lineSeparator());
+            sb.append("Paxos memory limit reached");
+        }
+
+        lastExecuteEnd = executeEnd;
+        lastTimeStamp = timestamp;
+    }
+
 }

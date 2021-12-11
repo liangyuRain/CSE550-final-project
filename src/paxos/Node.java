@@ -9,6 +9,7 @@ import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.BiFunction;
@@ -16,6 +17,8 @@ import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 public class Node {
+
+    public static final int PERODIC_LOG_INTERVAL = 1000;
 
     private final Address address;
     private final int packageQueueCapacity;
@@ -46,7 +49,8 @@ public class Node {
         this.dynamicExecutor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
         this.messageHandlerExecutor = messageHandlerExecutor;
 
-        this.dynamicExecutor.execute(this::logEssential);
+        this.scheduledExecutor.scheduleWithFixedDelay(
+                this::periodicLog, 0, PERODIC_LOG_INTERVAL, TimeUnit.MILLISECONDS);
     }
 
     public void init() {
@@ -225,89 +229,98 @@ public class Node {
 
     }
 
-    private void logEssential() {
+    private void periodicLog() {
         try {
-            BiFunction<ThreadPoolExecutor, String, String> logThreadPool = (executor, info) ->
-                    String.format(
-                            "%s info: Queue size: %d, Num of active thread: %d, Pool size: %d, Core pool size: %d",
-                            info,
-                            executor.getQueue().size(),
-                            executor.getActiveCount(),
-                            executor.getPoolSize(),
-                            executor.getCorePoolSize());
-            HashMap<Address, ConnectionPool.ConnectionPoolStat> lastConnPoolStats = new HashMap<>();
-            for (; ; ) {
-                double totalOutThroughput = 0.0;
-                double totalInThroughput = 0.0;
-                long totalQueueDelay = 0;
-                long totalQueueCount = 0;
+            StringBuilder sb = new StringBuilder();
 
-                StringBuilder sb = new StringBuilder();
-                sb.append(String.format("[%s] Log Essential:", address.hostname()));
-                sb.append(System.lineSeparator());
-                for (Map.Entry<Address, ConnectionPool> entry :
-                        addrToConn.entrySet().stream()
-                                .sorted(Map.Entry.comparingByKey())
-                                .collect(Collectors.toList())) {
-                    Address addr = entry.getKey();
-                    ConnectionPool.ConnectionPoolStat connPoolStat = entry.getValue().getConnectionPoolStat();
-                    sb.append(String.format(
-                            "Address: %s, Num of connections: %d, PackageQueue size: %d",
-                            addr, connPoolStat.numOfConnections, connPoolStat.packageQueueSize));
+            logEssential(sb);
 
-                    ConnectionPool.ConnectionPoolStat lastRecord = lastConnPoolStats.get(addr);
-                    int lastQueueCount = 0;
-                    long lastQueueTotalDelay = 0;
-                    if (lastRecord != null) {
-                        lastQueueCount = lastRecord.queueCount;
-                        lastQueueTotalDelay = lastRecord.queueTotalDelay;
-
-                        double outThroughput = (connPoolStat.outPkgCounter - lastRecord.outPkgCounter) * 1.0e9 /
-                                (connPoolStat.timestamp - lastRecord.timestamp);
-                        double inThroughput = (connPoolStat.inPkgCounter - lastRecord.inPkgCounter) * 1.0e9 /
-                                (connPoolStat.timestamp - lastRecord.timestamp);
-                        sb.append(String.format(
-                                ", Send throughput: %.3f, Receive throughput: %.3f", outThroughput, inThroughput));
-
-                        totalOutThroughput += outThroughput;
-                        totalInThroughput += inThroughput;
-                    }
-                    double averageQueueDelay = (connPoolStat.queueTotalDelay - lastQueueTotalDelay) / 1.0e3 /
-                            (connPoolStat.queueCount - lastQueueCount);
-                    sb.append(String.format(", Average queue delay: %.3f us", averageQueueDelay));
-
-                    totalQueueDelay += connPoolStat.queueTotalDelay - lastQueueTotalDelay;
-                    totalQueueCount += connPoolStat.queueCount - lastQueueCount;
-
-                    lastConnPoolStats.put(addr, connPoolStat);
-
-                    sb.append(System.lineSeparator());
-                }
-                sb.append(String.format(
-                        "Total send throughput: %.3f, Total receive throughput: %.3f, " +
-                                "Overall average queue delay: %.3f us",
-                        totalOutThroughput, totalInThroughput, totalQueueDelay / 1.0e3 / totalQueueCount));
-                sb.append(System.lineSeparator());
-
-                sb.append(logThreadPool.apply(scheduledExecutor, "ScheduledExecutor"));
-                sb.append(System.lineSeparator());
-                sb.append(logThreadPool.apply(dynamicExecutor, "DynamicExecutor"));
-                sb.append(System.lineSeparator());
-                sb.append(logThreadPool.apply(messageHandlerExecutor, "MessageHandlerExecutor"));
-
+            if (sb.length() > 0) {
                 String s = sb.toString();
-                log(Level.FINEST, s);
+                log(Level.INFO, s);
                 if (PRINT_LOG_ESSENTIAL()) {
                     System.out.println(s);
                     System.out.println();
                 }
-
-                Thread.sleep(1000);
             }
         } catch (Throwable e) {
             log(e);
             System.exit(1);
         }
+    }
+
+    private HashMap<Address, ConnectionPool.ConnectionPoolStat> lastConnPoolStats = new HashMap<>();
+
+    private static final BiFunction<ThreadPoolExecutor, String, String> logThreadPool = (executor, info) ->
+            String.format(
+                    "%s info: Queue size: %d, Num of active thread: %d, Pool size: %d, Core pool size: %d",
+                    info,
+                    executor.getQueue().size(),
+                    executor.getActiveCount(),
+                    executor.getPoolSize(),
+                    executor.getCorePoolSize());
+
+    protected void logEssential(StringBuilder sb) {
+        double totalOutThroughput = 0.0;
+        double totalInThroughput = 0.0;
+        long totalQueueDelay = 0;
+        long totalQueueCount = 0;
+
+        sb.append(String.format("[%s] Log Essential:", address.hostname()));
+        sb.append(System.lineSeparator());
+        sb.append(String.format("Time: %s", LogHandler.TIME_FORMATTER.format(LocalDateTime.now())));
+        sb.append(System.lineSeparator());
+        sb.append("ConnectionPools:");
+        sb.append(System.lineSeparator());
+        for (Map.Entry<Address, ConnectionPool> entry :
+                addrToConn.entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey())
+                        .collect(Collectors.toList())) {
+            Address addr = entry.getKey();
+            ConnectionPool.ConnectionPoolStat connPoolStat = entry.getValue().getConnectionPoolStat();
+            sb.append(String.format(
+                    "Address: %s%nNum of conn: %d, PkgQueue size: %d",
+                    addr.hostname(), connPoolStat.numOfConnections, connPoolStat.packageQueueSize));
+
+            ConnectionPool.ConnectionPoolStat lastRecord = lastConnPoolStats.get(addr);
+            int lastQueueCount = 0;
+            long lastQueueTotalDelay = 0;
+            if (lastRecord != null) {
+                lastQueueCount = lastRecord.queueCount;
+                lastQueueTotalDelay = lastRecord.queueTotalDelay;
+
+                double outThroughput = (connPoolStat.outPkgCounter - lastRecord.outPkgCounter) * 1.0e9 /
+                        (connPoolStat.timestamp - lastRecord.timestamp);
+                double inThroughput = (connPoolStat.inPkgCounter - lastRecord.inPkgCounter) * 1.0e9 /
+                        (connPoolStat.timestamp - lastRecord.timestamp);
+                sb.append(String.format(
+                        ", Send throughput: %.3f, Receive throughput: %.3f", outThroughput, inThroughput));
+
+                totalOutThroughput += outThroughput;
+                totalInThroughput += inThroughput;
+            }
+            double averageQueueDelay = (connPoolStat.queueTotalDelay - lastQueueTotalDelay) / 1.0e3 /
+                    (connPoolStat.queueCount - lastQueueCount);
+            sb.append(String.format(", Avg queue delay: %.3f us", averageQueueDelay));
+
+            totalQueueDelay += connPoolStat.queueTotalDelay - lastQueueTotalDelay;
+            totalQueueCount += connPoolStat.queueCount - lastQueueCount;
+
+            lastConnPoolStats.put(addr, connPoolStat);
+
+            sb.append(System.lineSeparator());
+        }
+        sb.append(String.format(
+                "Total send throughput: %.3f, Total receive throughput: %.3f, " +
+                        "Overall avg queue delay: %.3f us",
+                totalOutThroughput, totalInThroughput, totalQueueDelay / 1.0e3 / totalQueueCount));
+        sb.append(System.lineSeparator());
+
+        sb.append(logThreadPool.apply(scheduledExecutor, "ScheduledExecutor"));
+        sb.append(System.lineSeparator());
+        sb.append(logThreadPool.apply(dynamicExecutor, "DynamicExecutor"));
+        sb.append(System.lineSeparator());
+        sb.append(logThreadPool.apply(messageHandlerExecutor, "MessageHandlerExecutor"));
     }
 
 }

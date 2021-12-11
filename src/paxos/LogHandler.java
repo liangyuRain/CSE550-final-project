@@ -5,12 +5,15 @@ import lombok.extern.java.Log;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.time.format.DateTimeFormatter;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.SimpleFormatter;
 
 @Log
 public class LogHandler {
+
+    public static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("MM/dd/yyyy HH:mm:ss SSS");
 
     public static final int LOG_FILE_SIZE_LIMIT = 1024 * 1024 * 1024;
     public static final int LOG_FILE_COUNT = 5;

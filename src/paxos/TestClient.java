@@ -6,6 +6,7 @@ import application.LockCommand;
 import application.Result;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.Random;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.logging.Level;
@@ -45,9 +46,13 @@ public class TestClient {
                     long endCount = count.sum();
                     long endTime = System.nanoTime();
                     double throughput = (endCount - beginCount) / ((endTime - beginTime) / 1.0e9);
-                    client.log(Level.INFO, String.format("Test throughput: %.3f commands per second", throughput));
-                    System.out.printf("[%s] Test throughput: %.3f commands per second%n",
-                            client.address().hostname(), throughput);
+                    double avgTimeCost = (endTime - beginTime) / 1.0e6 / (endCount - beginCount);
+                    client.log(Level.INFO, String.format(
+                            "Test throughput: %.3f commands per second, Avg time cost: %.3f ms",
+                            throughput, avgTimeCost));
+                    System.out.printf("[%s] [%s] Test throughput: %.3f commands per second, Avg time cost: %.3f ms%n",
+                            LogHandler.TIME_FORMATTER.format(LocalDateTime.now()),
+                            client.address().hostname(), throughput, avgTimeCost);
                 }
             } catch (Throwable e) {
                 client.log(e);
@@ -77,7 +82,8 @@ public class TestClient {
 
             if (!res.equals(res2)) {
                 System.out.printf(
-                        "[%s] Result does not match, Received result: %s, Expected result: %s, Command: %s%n",
+                        "[%s] [%s] Result does not match, Received result: %s, Expected result: %s, Command: %s%n",
+                        LogHandler.TIME_FORMATTER.format(LocalDateTime.now()),
                         client.address().hostname(), res, res2, cmd);
                 client.log(Level.SEVERE, String.format("Result does not match: " +
                         "Received result: %s, Expected result: %s, Command: %s", res, res2, cmd));
