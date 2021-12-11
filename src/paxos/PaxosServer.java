@@ -32,6 +32,7 @@ public class PaxosServer extends Node {
     private final Map<Address, Boolean> alive; // alive server same as lab2
     private final AMOApplication app; // AMO application wrapper
     private final Map<Address, Integer> serverExecuted; // the latest executed command slot num for each server (gc purpose)
+    private int maxServerExecuted;
 
     private final Slots executed; // executed command slots
     private LinkedHashSet<AMOCommand> uncertain; // uncertain command slots.
@@ -69,6 +70,7 @@ public class PaxosServer extends Node {
         this.alive = new HashMap<>();
         this.app = new AMOApplication(app);
         this.serverExecuted = new HashMap<>();
+        this.maxServerExecuted = 0;
         this.executed = new Slots(new ArrayDeque<>(), 0, false);
         this.acceptorRole = new Acceptor();
     }
@@ -95,6 +97,14 @@ public class PaxosServer extends Node {
             // new leader found
             leader = sender;
             log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
+            if (!leader.equals(address())) {
+                leaderRole = null;
+                if (acceptorRole.maxAcceptNum.equals(prevAcceptorAcceptedNum)) { // restore acceptor state after demotion
+                    uncertain = prevAcceptorState.getRight();
+                    prevAcceptorAcceptedNum = null;
+                    prevAcceptorState = null;
+                }
+            }
         }
         if (!leader.equals(address())) {
             leaderRole = null;
@@ -109,9 +119,9 @@ public class PaxosServer extends Node {
 
     private boolean isUpToDate(Address sender) {
         if (sender.equals(address())) {
-            return true;
+            return executed.end() >= maxServerExecuted - MAX_NUM_OF_COMMAND_PER_MESSAGE;
         } else {
-            return serverExecuted.get(sender) >= executed.end() - MAX_NUM_OF_COMMAND_PER_MESSAGE;
+            return serverExecuted.get(sender) >= maxServerExecuted - MAX_NUM_OF_COMMAND_PER_MESSAGE;
         }
     }
 
@@ -124,14 +134,20 @@ public class PaxosServer extends Node {
     }
 
     private synchronized void handleRecover(Recover m, Address sender) {
+        garbageCollect(m.nextToExecute(), sender);
         received(sender);
         execute(m.executed().commands, m.executed().begin);
+        if (address().compareTo(leader) > 0 && isUpToDate(address())) {
+            leader = address();
+            log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
+        }
     }
 
     @Override
     protected boolean messageFilter(Message message, Address sender) {
         if (message instanceof PaxosRequest) {
-            return messageHandlerExecutor.getQueue().remainingCapacity() > MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE / 2;
+            return leader.equals(address()) &&
+                    messageHandlerExecutor.getQueue().remainingCapacity() > MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE / 2;
         }
         return true;
     }
@@ -157,10 +173,10 @@ public class PaxosServer extends Node {
     }
 
     private synchronized void handlePrepareReply(PrepareReply m, Address sender) {
-        received(sender);
         if (m.executed() != null) {
             garbageCollect(m.executed().end(), sender);
         }
+        received(sender);
         if (!leader.equals(address())) return;
         if (leaderRole == null) {
             leaderRole = new Leader();
@@ -210,8 +226,8 @@ public class PaxosServer extends Node {
     }
 
     private synchronized void handleAcceptReply(AcceptReply m, Address sender) {
-        received(sender);
         garbageCollect(m.nextToExecute(), sender);
+        received(sender);
         if (!leader.equals(address())) return;
         if (leaderRole == null) {
             leaderRole = new Leader();
@@ -250,8 +266,8 @@ public class PaxosServer extends Node {
     }
 
     private synchronized void handlePrepareRequest(PrepareRequest m, Address sender) {
-        received(sender);
         garbageCollect(m.nextToExecute(), sender);
+        received(sender);
         if (!leader.equals(sender)) return;
         if (!isUpToDate(sender)) return;
         if (m.proposalNum().compareTo(acceptorRole.maxPrepareNum) >= 0) { // respond with promise
@@ -265,8 +281,8 @@ public class PaxosServer extends Node {
     }
 
     private synchronized void handleAcceptRequest(AcceptRequest m, Address sender) {
-        received(sender);
         garbageCollect(m.executed().end(), sender);
+        received(sender);
         if (!leader.equals(sender)) return;
         if (m.acceptNum().compareTo(acceptorRole.maxAcceptNum) >= 0) { // accept the request and sync with leader state
             acceptorRole.maxPrepareNum = ImmutablePair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
@@ -298,26 +314,18 @@ public class PaxosServer extends Node {
                     entry.setValue(false);
                 }
             }
-            alive.put(address(), true);
-            if (!alive.containsKey(leader) || !isUpToDate(leader)) {
-                // leader no longer alive or too stale, choose highest alive up-to-date address
-                for (int i = servers.length - 1; i >= 0; --i) {
-                    if (alive.containsKey(servers[i]) && isUpToDate(servers[i])) {
-                        leader = servers[i];
-                        log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
-                        if (leader.equals(address())) {
-                            leaderRole = new Leader();
-                        }
-                        break;
-                    }
-                }
-            }
+        }
+        check = !check;
+        alive.put(address(), true);
+        electLeader();
+        if (!leader.equals(address()) ||
+                serverExecuted.keySet().stream().filter(alive::containsKey).noneMatch(this::isUpToDate)) {
             for (int i = (selfIndex + 1) % servers.length; i != selfIndex; i = (i + 1) % servers.length) {
-                if (alive.containsKey(servers[i])) {
+                if (alive.containsKey(servers[i]) && !leader.equals(servers[i])) {
                     int serverEnd = serverExecuted.get(servers[i]);
                     if (serverEnd < executed.end() - MAX_NUM_OF_COMMAND_PER_MESSAGE / 10) {
                         send(new Recover(executed.startFrom(
-                                serverEnd, MAX_NUM_OF_COMMAND_PER_MESSAGE), false), servers[i]);
+                                serverEnd, MAX_NUM_OF_COMMAND_PER_MESSAGE), executed.end(), false), servers[i]);
                     }
                     break;
                 }
@@ -532,9 +540,32 @@ public class PaxosServer extends Node {
         int oldNum = serverExecuted.get(sender);
         if (nextToExecute > oldNum) {
             serverExecuted.put(sender, nextToExecute);
+            if (nextToExecute > maxServerExecuted) {
+                maxServerExecuted = nextToExecute;
+            }
             if (nextToExecute > executed.begin) {
                 // garbage collect commands that every server has executed
                 executed.gc(serverExecuted.values().stream().min(Integer::compare).get());
+            }
+        }
+    }
+
+    private void electLeader() {
+        for (int i = servers.length - 1; i >= 0; --i) {
+            if (alive.containsKey(servers[i]) && isUpToDate(servers[i])) {
+                if (!leader.equals(servers[i])) {
+                    log(Level.INFO, String.format("Server %s promoted as leader", leader.hostname()));
+                }
+                leader = servers[i];
+                if (!leader.equals(address())) {
+                    leaderRole = null;
+                    if (acceptorRole.maxAcceptNum.equals(prevAcceptorAcceptedNum)) { // restore acceptor state after demotion
+                        uncertain = prevAcceptorState.getRight();
+                        prevAcceptorAcceptedNum = null;
+                        prevAcceptorState = null;
+                    }
+                }
+                break;
             }
         }
     }
