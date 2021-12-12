@@ -51,14 +51,26 @@ public class Node {
         this.addrToConn = new ConcurrentHashMap<>();
         this.lastActivity = new ConcurrentHashMap<>();
 
-        this.scheduledExecutor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(10);
-        this.dynamicExecutor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
+        this.scheduledExecutor = Executors.newScheduledThreadPool(5);
+        this.dynamicExecutor = Executors.newCachedThreadPool();
         this.messageHandlerExecutor = messageHandlerExecutor;
 
-        this.scheduledExecutor.scheduleWithFixedDelay(
-                this::periodicLog, 0, PERODIC_LOG_INTERVAL, TimeUnit.MILLISECONDS);
-        this.scheduledExecutor.scheduleWithFixedDelay(
-                this::connectionPoolGC, 0, CONNECTIONPOOL_GC_INTERVAL, TimeUnit.MILLISECONDS);
+        this.scheduledExecutor.scheduleWithFixedDelay(() -> {
+            try {
+                dynamicExecutor.execute(this::periodicLog);
+            } catch (Throwable e) {
+                log(e);
+                System.exit(1);
+            }
+        }, 0, PERODIC_LOG_INTERVAL, TimeUnit.MILLISECONDS);
+        this.scheduledExecutor.scheduleWithFixedDelay(() -> {
+            try {
+                dynamicExecutor.execute(this::connectionPoolGC);
+            } catch (Throwable e) {
+                log(e);
+                System.exit(1);
+            }
+        }, 0, CONNECTIONPOOL_GC_INTERVAL, TimeUnit.MILLISECONDS);
     }
 
     public void init() {
@@ -344,10 +356,6 @@ public class Node {
         sb.append(System.lineSeparator());
         sb.append(System.lineSeparator());
 
-        sb.append(logThreadPool.apply(scheduledExecutor, "ScheduledExecutor"));
-        sb.append(System.lineSeparator());
-        sb.append(logThreadPool.apply(dynamicExecutor, "DynamicExecutor"));
-        sb.append(System.lineSeparator());
         sb.append(logThreadPool.apply(messageHandlerExecutor, "MessageHandlerExecutor"));
     }
 
