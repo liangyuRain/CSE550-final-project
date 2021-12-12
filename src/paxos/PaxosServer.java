@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 @EqualsAndHashCode(callSuper = true)
 public class PaxosServer extends Node {
 
-    private static final int MESSAGE_HANDLER_EXECUTOR_NUM_OF_THREAD = 20;
+    private static final int MESSAGE_HANDLER_EXECUTOR_NUM_OF_THREAD = 5;
     private static final int MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE = 100;
 
     private static final int MAX_NUM_OF_COMMAND_PER_MESSAGE = 10000;

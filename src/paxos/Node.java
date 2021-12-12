@@ -27,8 +27,8 @@ public class Node {
     private final Address address;
     private final int packageQueueCapacity;
 
-    private final ScheduledThreadPoolExecutor scheduledExecutor;
-    private final ThreadPoolExecutor dynamicExecutor;
+    private final ScheduledExecutorService scheduledExecutor;
+    private final ExecutorService dynamicExecutor;
     protected final ThreadPoolExecutor messageHandlerExecutor;
 
     private final LogHandler logHandler;
@@ -70,39 +70,41 @@ public class Node {
             for (; ; ) {
                 try {
                     Socket clientSocket = serverSkt.accept();
-                    dynamicExecutor.execute(() -> {
-                        try {
-                            clientSocket.setSoTimeout(60 * 1000);
-                            int port = ConnectionPool.readPort(clientSocket);
-                            if (port < 0) {
-                                log(Level.SEVERE, "Failed to read port number");
-                                return;
-                            }
-                            Address clientAddr = new Address(
-                                    ((InetSocketAddress) clientSocket.getRemoteSocketAddress())
-                                            .getAddress().getHostAddress(),
-                                    port);
-                            log(Level.FINEST, String.format(
-                                    "Accepted connection from %s: %s", clientAddr.hostname(), clientSocket));
-                            addrToConn.computeIfAbsent(clientAddr, k ->
-                                            new ConnectionPool(
-                                                    address,
-                                                    k,
-                                                    packageQueueCapacity,
-                                                    logHandler,
-                                                    this::handleMessage))
-                                    .addConnection(clientSocket);
-                            lastActivity.compute(clientAddr,
-                                    (k, t) -> Math.max(System.currentTimeMillis(), t == null ? Integer.MIN_VALUE : t));
-                        } catch (Throwable e) {
-                            log(e);
-                            System.exit(1);
-                        }
-                    });
+                    dynamicExecutor.execute(() -> addSocket(clientSocket));
                 } catch (IOException e) {
                     log(Level.SEVERE, String.format("Listening failed with %s", e));
                 }
             }
+        } catch (Throwable e) {
+            log(e);
+            System.exit(1);
+        }
+    }
+
+    private void addSocket(Socket clientSocket) {
+        try {
+            clientSocket.setSoTimeout(60 * 1000);
+            int port = ConnectionPool.readPort(clientSocket);
+            if (port < 0) {
+                log(Level.SEVERE, "Failed to read port number");
+                return;
+            }
+            Address clientAddr = new Address(
+                    ((InetSocketAddress) clientSocket.getRemoteSocketAddress())
+                            .getAddress().getHostAddress(),
+                    port);
+            log(Level.FINEST, String.format(
+                    "Accepted connection from %s: %s", clientAddr.hostname(), clientSocket));
+            addrToConn.computeIfAbsent(clientAddr, k ->
+                            new ConnectionPool(
+                                    address,
+                                    k,
+                                    packageQueueCapacity,
+                                    logHandler,
+                                    this::handleMessage))
+                    .addConnection(clientSocket);
+            lastActivity.compute(clientAddr,
+                    (k, t) -> Math.max(System.currentTimeMillis(), t == null ? Integer.MIN_VALUE : t));
         } catch (Throwable e) {
             log(e);
             System.exit(1);
@@ -243,7 +245,7 @@ public class Node {
     private void connectionPoolGC() {
         try {
             long now = System.currentTimeMillis();
-            for (Map.Entry<Address, Long> entry: lastActivity.entrySet()) {
+            for (Map.Entry<Address, Long> entry : lastActivity.entrySet()) {
                 if (now - entry.getValue() > CONNECTIONPOOL_TIMEOUT) {
                     ConnectionPool cp = addrToConn.remove(entry.getKey());
                     if (cp != null) dynamicExecutor.execute(cp::close);
