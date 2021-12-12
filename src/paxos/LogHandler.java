@@ -16,7 +16,7 @@ public class LogHandler {
     public static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("MM/dd/yyyy HH:mm:ss SSS");
 
     public static final int LOG_FILE_SIZE_LIMIT = 1024 * 1024 * 1024;
-    public static final int LOG_FILE_COUNT = 5;
+    public static final int LOG_FILE_COUNT = 2;
 
     static {
         System.setProperty("java.util.logging.SimpleFormatter.format",
