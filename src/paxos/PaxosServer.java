@@ -674,14 +674,12 @@ public class PaxosServer extends Node {
                         alive.keySet().stream()
                                 .sorted()
                                 .map(Address::hostname)
-                                .reduce((s1, s2) -> String.join(", ", s1, s2))
-                                .orElse(""),
+                                .collect(Collectors.joining(",")),
                         serverExecutedCopy.entrySet().stream()
                                 .sorted(Map.Entry.comparingByKey())
                                 .map(entry -> String.format(
                                         "(%s): %s", entry.getKey().hostname(), entry.getValue()))
-                                .reduce((s1, s2) -> String.join(", ", s1, s2))
-                                .get(),
+                                .collect(Collectors.joining(", ")),
                         leader.hostname())
         );
 

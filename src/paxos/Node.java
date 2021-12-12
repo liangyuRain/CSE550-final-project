@@ -230,8 +230,9 @@ public class Node {
     }
 
     private void periodicLog() {
+        String padding = StringUtils.repeat(System.lineSeparator(), 100);
         try {
-            StringBuilder sb = new StringBuilder();
+            StringBuilder sb = new StringBuilder(padding);
 
             logEssential(sb);
 
@@ -249,7 +250,7 @@ public class Node {
         }
     }
 
-    private HashMap<Address, ConnectionPool.ConnectionPoolStat> lastConnPoolStats = new HashMap<>();
+    private final HashMap<Address, ConnectionPool.ConnectionPoolStat> lastConnPoolStats = new HashMap<>();
 
     private static final BiFunction<ThreadPoolExecutor, String, String> logThreadPool = (executor, info) ->
             String.format(
