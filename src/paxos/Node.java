@@ -2,6 +2,7 @@ package paxos;
 
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
@@ -13,12 +14,15 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 public class Node {
 
     public static final int PERODIC_LOG_INTERVAL = 1000;
+    public static final long CONNECTIONPOOL_TIMEOUT = 5 * 1000; // millisecond
+    public static final long CONNECTIONPOOL_GC_INTERVAL = 1000; // millisecond
 
     private final Address address;
     private final int packageQueueCapacity;
@@ -30,6 +34,7 @@ public class Node {
     private final LogHandler logHandler;
 
     private final ConcurrentHashMap<Address, ConnectionPool> addrToConn;
+    private final ConcurrentHashMap<Address, Long> lastActivity;
 
     protected boolean PRINT_LOG_ESSENTIAL() {
         return true;
@@ -44,6 +49,7 @@ public class Node {
         this.logHandler.addFile(String.format(
                 "%s_%s.log", this.getClass().getSimpleName(), address.hostname().replaceAll("[.:]", "_")));
         this.addrToConn = new ConcurrentHashMap<>();
+        this.lastActivity = new ConcurrentHashMap<>();
 
         this.scheduledExecutor = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(10);
         this.dynamicExecutor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
@@ -51,6 +57,8 @@ public class Node {
 
         this.scheduledExecutor.scheduleWithFixedDelay(
                 this::periodicLog, 0, PERODIC_LOG_INTERVAL, TimeUnit.MILLISECONDS);
+        this.scheduledExecutor.scheduleWithFixedDelay(
+                this::connectionPoolGC, 0, CONNECTIONPOOL_GC_INTERVAL, TimeUnit.MILLISECONDS);
     }
 
     public void init() {
@@ -82,9 +90,10 @@ public class Node {
                                                     k,
                                                     packageQueueCapacity,
                                                     logHandler,
-                                                    dynamicExecutor,
                                                     this::handleMessage))
                                     .addConnection(clientSocket);
+                            lastActivity.compute(clientAddr,
+                                    (k, t) -> Math.max(System.currentTimeMillis(), t == null ? Integer.MIN_VALUE : t));
                         } catch (Throwable e) {
                             log(e);
                             System.exit(1);
@@ -118,7 +127,8 @@ public class Node {
 
     protected final void send(Message message, Address to) {
         addrToConn.computeIfAbsent(to, k -> new ConnectionPool(
-                address, k, packageQueueCapacity, logHandler, dynamicExecutor, this::handleMessage)).send(message);
+                address, k, packageQueueCapacity, logHandler, this::handleMessage)).send(message);
+        lastActivity.compute(to, (k, t) -> Math.max(System.currentTimeMillis(), t == null ? Integer.MIN_VALUE : t));
     }
 
     protected final void broadcast(Message message, Collection<Address> to) {
@@ -192,6 +202,7 @@ public class Node {
         } else {
             log(Level.FINEST, String.format("Message from %s has been filtered out: %s", sender, message));
         }
+        lastActivity.compute(sender, (k, t) -> Math.max(System.currentTimeMillis(), t == null ? Integer.MIN_VALUE : t));
     }
 
     @AllArgsConstructor
@@ -227,6 +238,21 @@ public class Node {
                     "Handled message from %s with %.3f us: %s", sender, (System.nanoTime() - start) / 1.0e3, message));
         }
 
+    }
+
+    private void connectionPoolGC() {
+        try {
+            long now = System.currentTimeMillis();
+            for (Map.Entry<Address, Long> entry: lastActivity.entrySet()) {
+                if (now - entry.getValue() > CONNECTIONPOOL_TIMEOUT) {
+                    ConnectionPool cp = addrToConn.remove(entry.getKey());
+                    if (cp != null) dynamicExecutor.execute(cp::close);
+                }
+            }
+        } catch (Throwable e) {
+            log(e);
+            System.exit(1);
+        }
     }
 
     private void periodicLog() {
@@ -270,6 +296,9 @@ public class Node {
         sb.append(String.format("[%s] [%s] Log Essential:",
                 LogHandler.TIME_FORMATTER.format(LocalDateTime.now()), address.hostname()));
         sb.append(System.lineSeparator());
+
+        lastConnPoolStats.keySet().removeIf(((Predicate<Address>) addrToConn::containsKey).negate());
+
         for (Map.Entry<Address, ConnectionPool> entry :
                 addrToConn.entrySet().stream()
                         .sorted(Map.Entry.comparingByKey())

@@ -8,15 +8,13 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.BiConsumer;
 import java.util.logging.Level;
 
-public class ConnectionPool {
+public class ConnectionPool implements Closeable, AutoCloseable {
 
     public static final int CONNECTION_TIMEOUT = 500; // millisecond
     public static final int RECONNECT_INTERVAL = 500; // millisecond
@@ -44,8 +42,9 @@ public class ConnectionPool {
         output.flush();
     }
 
-    private final Executor executor;
+    private final ExecutorService executor;
     private final BiConsumer<Message, Address> messageHandler;
+    private boolean closed = false;
 
     private final ArrayBlockingQueueSet<Package> outboundPackages;
     private final Address address;
@@ -63,12 +62,11 @@ public class ConnectionPool {
                           Address to,
                           int packageQueueCapacity,
                           LogHandler logHandler,
-                          Executor executor,
                           BiConsumer<Message, Address> messageHandler) {
         this.address = address;
         this.to = to;
         this.logHandler = logHandler.derivative(String.format("[ConnectionPool %s]", to.hostname()));
-        this.executor = executor;
+        this.executor = Executors.newCachedThreadPool();
         this.messageHandler = messageHandler;
 
         this.connections = new ConcurrentHashMap<>();
@@ -106,6 +104,31 @@ public class ConnectionPool {
         );
     }
 
+    @Override
+    public void close() {
+        try {
+            log(Level.FINER, "Closing ConnectionPool");
+            synchronized (connections) {
+                closed = true;
+                executor.shutdownNow();
+                outboundPackages.clear();
+                for (Map.Entry<Long, Socket> entry : connections.entrySet()) {
+                    long id = entry.getKey();
+                    Socket skt = entry.getValue();
+                    try {
+                        skt.close();
+                    } catch (IOException e) {
+                        log(Level.SEVERE, String.format("Close connection %d to %s failed with %s", id, to, e));
+                    }
+                }
+                connections.clear();
+            }
+        } catch (Throwable e) {
+            log(e);
+            System.exit(1);
+        }
+    }
+
     private class ConnectionCreationTask implements Runnable {
 
         @Override
@@ -141,6 +164,8 @@ public class ConnectionPool {
                         long id = addConnectionInternal(skt, true);
                         if (id >= 0) {
                             log(Level.FINER, String.format("Created connection %s to %s", id, to.hostname()));
+                        } else {
+                            skt.close();
                         }
                     } catch (SocketTimeoutException e) {
                         log(Level.SEVERE, String.format("Create connection to %s timed out", to.hostname()));
@@ -148,7 +173,11 @@ public class ConnectionPool {
                         log(Level.SEVERE, String.format("Create connection to %s failed with %s", to.hostname(), e));
                         Thread.sleep(RECONNECT_INTERVAL);
                     }
+
+                    if (Thread.interrupted()) throw new InterruptedException();
                 }
+            } catch (InterruptedException e) {
+                log(Level.SEVERE, String.format("%s interrupted", this.getClass().getSimpleName()));
             } catch (Throwable e) {
                 log(e);
                 System.exit(1);
@@ -178,7 +207,11 @@ public class ConnectionPool {
                     }
                     timedOutConnections.clear();
                     Thread.sleep(TEST_ALIVE_INTERVAL);
+
+                    if (Thread.interrupted()) throw new InterruptedException();
                 }
+            } catch (InterruptedException e) {
+                log(Level.SEVERE, String.format("%s interrupted", this.getClass().getSimpleName()));
             } catch (Throwable e) {
                 log(e);
                 System.exit(1);
@@ -192,6 +225,8 @@ public class ConnectionPool {
             long id = addConnectionInternal(skt, false);
             if (id >= 0) {
                 log(Level.FINER, String.format("Added connection %d from %s", id, to.hostname()));
+            } else {
+                skt.close();
             }
         } catch (Throwable e) {
             log(e);
@@ -206,16 +241,20 @@ public class ConnectionPool {
         }
         long id;
         synchronized (connections) {
+            if (closed) {
+                log(Level.SEVERE, "Connection addition failed: ConnectionPool closed");
+                return -1;
+            }
             if (connections.size() >= MAX_NUM_OF_CONNECTIONS) {
                 log(Level.SEVERE, "Add connection failed due to too many connections");
                 return -1;
             }
             id = counter.getAndIncrement();
             connections.put(id, skt);
+            lastReceival.put(id, System.currentTimeMillis());
+            executor.execute(new SendTask(id, writePortFirst, logHandler));
+            executor.execute(new ReceiveTask(id, logHandler));
         }
-        lastReceival.put(id, System.currentTimeMillis());
-        executor.execute(new SendTask(id, writePortFirst, logHandler));
-        executor.execute(new ReceiveTask(id, logHandler));
         log(Level.FINEST, String.format(
                 "%s added as connection %d; Active connection to %s: %d",
                 skt, id, to.hostname(), connections.size()));
@@ -324,6 +363,8 @@ public class ConnectionPool {
                                 log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg));
                                 return;
                             }
+
+                            if (Thread.interrupted()) throw new InterruptedException();
                         }
                     }
                 } catch (IOException e) {
@@ -331,6 +372,8 @@ public class ConnectionPool {
                 } finally {
                     closeConnection(id);
                 }
+            } catch (InterruptedException e) {
+                log(Level.SEVERE, String.format("%s interrupted", this.getClass().getSimpleName()));
             } catch (Throwable e) {
                 log(e);
                 System.exit(1);
@@ -383,12 +426,16 @@ public class ConnectionPool {
                             log(Level.SEVERE, "Connection has been closed");
                             return;
                         }
+
+                        if (Thread.interrupted()) throw new InterruptedException();
                     }
                 } catch (IOException e) {
                     log(Level.SEVERE, String.format("Constructing ObjectInputStream failed with %s", e));
                 } finally {
                     closeConnection(id);
                 }
+            } catch (InterruptedException e) {
+                log(Level.SEVERE, String.format("%s interrupted", this.getClass().getSimpleName()));
             } catch (Throwable e) {
                 log(e);
                 System.exit(1);
