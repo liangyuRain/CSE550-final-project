@@ -30,7 +30,6 @@ public final class AMOApplication implements Application {
 
         AMOCommand amoCommand = (AMOCommand) command;
 
-        // Your code here...
         AMOResult result;
         if (alreadyExecuted(amoCommand)) {
             result = executed.get(amoCommand.clientAddr());
