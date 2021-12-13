@@ -125,17 +125,23 @@ public final class PaxosClient extends Node implements Client {
             LockCommand cmd = null;
             try {
                 String opt = st.nextToken().toUpperCase();
-                long locknum = Long.parseLong(st.nextToken());
+
+                long[] locknums = new long[st.countTokens()];
+                for (int i = 0; i < locknums.length; ++i) {
+                    locknums[i] = Long.parseLong(st.nextToken());
+                }
 
                 if (opt.equals("LOCK")) {
-                    cmd = new LockCommand(LockCommand.Operation.LOCK, locknum, signature);
+                    cmd = new LockCommand(LockCommand.Operation.LOCK, locknums, signature);
                 } else if (opt.equals("UNLOCK")) {
-                    cmd = new LockCommand(LockCommand.Operation.UNLOCK, locknum, signature);
+                    cmd = new LockCommand(LockCommand.Operation.UNLOCK, locknums, signature);
+                } else if (opt.equals("QUERY")) {
+                    cmd = new LockCommand(LockCommand.Operation.QUERY, locknums, signature);
                 } else {
                     throw new IllegalArgumentException();
                 }
             } catch (Exception e) {
-                System.out.println("Illegal input, usage: [lock/unlock] [locknum]");
+                System.out.println("Illegal input, usage: [lock/unlock/query] [locknum_1] [locknum_2] ...");
             }
 
             if (cmd != null) {

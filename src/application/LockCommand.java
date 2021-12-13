@@ -7,10 +7,10 @@ import java.io.Serializable;
 @Value
 public class LockCommand implements Serializable, Command {
 
-    public enum Operation {LOCK, UNLOCK}
+    public enum Operation {LOCK, UNLOCK, QUERY}
 
     Operation operation;
-    long locknum;
+    long[] locknums;
     long signature;
 
     @Override

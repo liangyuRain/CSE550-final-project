@@ -60,11 +60,20 @@ public class TestClient {
             }
         }).start();
 
-        for (; ; ) {
-            long locknum = signature * (1 + r.nextInt(TEST_KEY_NUM));
-            LockCommand.Operation opt = r.nextBoolean() ? LockCommand.Operation.LOCK : LockCommand.Operation.UNLOCK;
+        LockCommand.Operation[] opts = new LockCommand.Operation[]{
+                LockCommand.Operation.LOCK,
+                LockCommand.Operation.UNLOCK,
+                LockCommand.Operation.QUERY
+        };
 
-            LockCommand cmd = new LockCommand(opt, locknum, signature);
+        for (; ; ) {
+            long[] locknums = new long[r.nextInt(TEST_KEY_NUM)];
+            for (int i = 0; i < locknums.length; ++i) {
+                locknums[i] = signature * (1 + r.nextInt(TEST_KEY_NUM));
+            }
+            LockCommand.Operation opt = opts[r.nextInt(opts.length)];
+
+            LockCommand cmd = new LockCommand(opt, locknums, signature);
 
             client.log(Level.FINE, String.format("Sending command: %s%n", cmd));
 

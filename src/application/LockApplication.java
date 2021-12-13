@@ -1,17 +1,16 @@
 package application;
 
 import java.io.Serializable;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 public class LockApplication implements Serializable, Application {
 
-    private final Map<Long, Long> locks;
-    private final Map<Long, Long> operationCounter;
+    private final Map<Long, Long> lockToSig;
+    private final Map<Long, Set<Long>> sigToLock;
 
     public LockApplication() {
-        this.locks = new HashMap<>();
-        this.operationCounter = new HashMap<>();
+        this.lockToSig = new HashMap<>();
+        this.sigToLock = new HashMap<>();
     }
 
     @Override
@@ -20,28 +19,45 @@ public class LockApplication implements Serializable, Application {
             return null;
         }
         LockCommand lockCommand = (LockCommand) command;
+        long[] locknums = lockCommand.locknums();
+        long signature = lockCommand.signature();
+        Set<Long> locks = sigToLock.computeIfAbsent(signature, k -> new HashSet<>());
 
-        long locknum = lockCommand.locknum();
-        Long signature = lockCommand.signature();
-        long count = operationCounter.getOrDefault(locknum, 0L) + 1;
-        operationCounter.put(locknum, count);
         switch (lockCommand.operation()) {
             case LOCK:
-                if (!locks.containsKey(locknum)) {
-                    locks.put(locknum, signature);
-                    return new LockResult(true, count);
+                if (locks.isEmpty()) {
+                    if (Arrays.stream(locknums).noneMatch(lockToSig::containsKey)) {
+                        for (long locknum : locknums) {
+                            if (lockToSig.put(locknum, signature) == null) {
+                                locks.add(locknum);
+                            }
+                        }
+                        return new LockResult(true, locks);
+                    }
                 } else {
-                    return new LockResult(false, count);
+                    if (Arrays.stream(locknums).allMatch(locks::contains)) {
+                        return new LockResult(true, locks);
+                    }
                 }
+                return new LockResult(false, locks);
             case UNLOCK:
-                if (signature.equals(locks.get(locknum))) {
-                    locks.remove(locknum);
-                    return new LockResult(true, count);
+                if (Arrays.stream(locknums).allMatch(n -> {
+                    Long lockSig = lockToSig.get(n);
+                    return lockSig == null || lockSig.equals(signature);
+                })) {
+                    for (long locknum : locknums) {
+                        if (lockToSig.remove(locknum) != null) {
+                            locks.remove(locknum);
+                        }
+                    }
+                    return new LockResult(true, locks);
                 } else {
-                    return new LockResult(false, count);
+                    return new LockResult(false, locks);
                 }
+            case QUERY:
+                return new LockResult(true, locks);
             default:
-                return null;
+                throw new IllegalArgumentException("Unknown operation");
         }
     }
 
