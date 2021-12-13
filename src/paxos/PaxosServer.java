@@ -652,44 +652,40 @@ public class PaxosServer extends Node {
         super.logEssential(sb);
         sb.append(System.lineSeparator());
 
-        int executeEnd;
-        int numOfSlotsInMemory;
-        HashMap<Address, Integer> serverExecutedCopy;
         synchronized (this) {
-            executeEnd = executed.end();
-            numOfSlotsInMemory = executed.commands.size();
-            serverExecutedCopy = new HashMap<>(serverExecuted);
+            int executeEnd = executed.end();
+            int numOfSlotsInMemory = executed.commands.size();
+
+            long timestamp = System.nanoTime();
+            double throughput = (executeEnd - lastExecuteEnd) * 1.0e9 / (timestamp - lastTimeStamp);
+            double avgTimeCost = (timestamp - lastTimeStamp) / 1.0e6 / (executeEnd - lastExecuteEnd);
+            sb.append(
+                    String.format("Paxos info: Executed: %d, Throughput: %.3f, " +
+                                    "Avg time cost: %.3f ms, Num of commands in memory: %d%n" +
+                                    "Server Alive: [%s]%n" +
+                                    "Server Executed: %n{%s}%n" +
+                                    "Leader: %s",
+                            executeEnd, throughput, avgTimeCost, numOfSlotsInMemory,
+                            alive.keySet().stream()
+                                    .sorted()
+                                    .map(Address::hostname)
+                                    .collect(Collectors.joining(", ")),
+                            serverExecuted.entrySet().stream()
+                                    .sorted(Map.Entry.comparingByKey())
+                                    .map(entry -> String.format(
+                                            "(%s): %s", entry.getKey().hostname(), entry.getValue()))
+                                    .collect(Collectors.joining(", ")),
+                            leader.hostname())
+            );
+
+            if (executed.commands.size() > MAX_NUM_OF_COMMAND_IN_MEMORY - MAX_NUM_OF_COMMAND_PER_MESSAGE) {
+                sb.append(System.lineSeparator());
+                sb.append("Paxos memory limit reached");
+            }
+
+            lastExecuteEnd = executeEnd;
+            lastTimeStamp = timestamp;
         }
-
-        long timestamp = System.nanoTime();
-        double throughput = (executeEnd - lastExecuteEnd) * 1.0e9 / (timestamp - lastTimeStamp);
-        double avgTimeCost = (timestamp - lastTimeStamp) / 1.0e6 / (executeEnd - lastExecuteEnd);
-        sb.append(
-                String.format("Paxos info: Executed: %d, Throughput: %.3f, " +
-                                "Avg time cost: %.3f ms, Num of commands in memory: %d%n" +
-                                "Server Alive: [%s]%n" +
-                                "Server Executed: %n{%s}%n" +
-                                "Leader: %s",
-                        executeEnd, throughput, avgTimeCost, numOfSlotsInMemory,
-                        alive.keySet().stream()
-                                .sorted()
-                                .map(Address::hostname)
-                                .collect(Collectors.joining(", ")),
-                        serverExecutedCopy.entrySet().stream()
-                                .sorted(Map.Entry.comparingByKey())
-                                .map(entry -> String.format(
-                                        "(%s): %s", entry.getKey().hostname(), entry.getValue()))
-                                .collect(Collectors.joining(", ")),
-                        leader.hostname())
-        );
-
-        if (executed.commands.size() > MAX_NUM_OF_COMMAND_IN_MEMORY - MAX_NUM_OF_COMMAND_PER_MESSAGE) {
-            sb.append(System.lineSeparator());
-            sb.append("Paxos memory limit reached");
-        }
-
-        lastExecuteEnd = executeEnd;
-        lastTimeStamp = timestamp;
     }
 
 }
