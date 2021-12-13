@@ -117,6 +117,8 @@ public class Node {
                     .addConnection(clientSocket);
             lastActivity.compute(clientAddr,
                     (k, t) -> Math.max(System.currentTimeMillis(), t == null ? Integer.MIN_VALUE : t));
+        } catch (IOException e) {
+            log(Level.SEVERE, String.format("Failed to add socket: %s", e));
         } catch (Throwable e) {
             log(e);
             System.exit(1);
