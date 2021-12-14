@@ -63,9 +63,11 @@ public class ConnectionPool implements Closeable, AutoCloseable {
                           int packageQueueCapacity,
                           LogHandler logHandler,
                           BiConsumer<Message, Address> messageHandler) {
+        this.logHandler = logHandler.derivative(String.format("[ConnectionPool %s]", to.hostname()));
+        log(Level.FINEST, "Creating ConnectionPool");
+
         this.address = address;
         this.to = to;
-        this.logHandler = logHandler.derivative(String.format("[ConnectionPool %s]", to.hostname()));
         this.executor = Executors.newCachedThreadPool();
         this.messageHandler = messageHandler;
 
@@ -89,6 +91,8 @@ public class ConnectionPool implements Closeable, AutoCloseable {
             executor.execute(new ConnectionCreationTask());
             executor.execute(new ConnectionMonitorTask());
         }
+
+        log(Level.FINER, "Created ConnectionPool");
     }
 
     public ConnectionPoolStat getConnectionPoolStat() {
