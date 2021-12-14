@@ -116,7 +116,7 @@ public final class PaxosClient extends Node implements Client {
             System.out.print("> ");
 
             if (!console.hasNextLine()) {
-                return;
+                System.exit(0);
             }
 
             String line = console.nextLine();
