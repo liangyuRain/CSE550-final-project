@@ -22,7 +22,7 @@ public class Node {
 
     public static final int PERODIC_LOG_INTERVAL = 1000;
     public static final long CONNECTIONPOOL_TIMEOUT = 5 * 1000; // millisecond
-    public static final long CONNECTIONPOOL_GC_INTERVAL = 1000; // millisecond
+    public static final long CONNECTIONPOOL_GC_INTERVAL = CONNECTIONPOOL_TIMEOUT; // millisecond
 
     private final Address address;
     private final int packageQueueCapacity;
@@ -115,8 +115,6 @@ public class Node {
                                     logHandler,
                                     this::handleMessage))
                     .addConnection(clientSocket);
-            lastActivity.compute(clientAddr,
-                    (k, t) -> Math.max(System.currentTimeMillis(), t == null ? Integer.MIN_VALUE : t));
         } catch (IOException e) {
             log(Level.SEVERE, String.format("Failed to add socket: %s", e));
         } catch (Throwable e) {
@@ -259,11 +257,18 @@ public class Node {
     private void connectionPoolGC() {
         try {
             long now = System.currentTimeMillis();
+            List<Address> closing = new ArrayList<>();
             for (Map.Entry<Address, Long> entry : lastActivity.entrySet()) {
-                if (now - entry.getValue() > CONNECTIONPOOL_TIMEOUT) {
-                    ConnectionPool cp = addrToConn.remove(entry.getKey());
-                    if (cp != null) dynamicExecutor.execute(cp::close);
+                ConnectionPool cp = addrToConn.get(entry.getKey());
+                if (cp != null && now - entry.getValue() > CONNECTIONPOOL_TIMEOUT &&
+                        cp.getConnectionPoolStat().numOfConnections == 0) {
+                    closing.add(entry.getKey());
                 }
+            }
+            for (Address addr : closing) {
+                ConnectionPool cp = addrToConn.remove(addr);
+                lastActivity.remove(addr);
+                if (cp != null) dynamicExecutor.execute(cp::close);
             }
         } catch (Throwable e) {
             log(e);
