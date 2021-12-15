@@ -285,7 +285,7 @@ public class Node {
 
             if (sb.length() > 0) {
                 String s = sb.toString();
-                log(Level.INFO, s);
+                log(Level.FINEST, s);
                 if (PRINT_LOG_ESSENTIAL()) {
                     System.out.println(s);
                     System.out.println();
