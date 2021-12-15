@@ -12,7 +12,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 @Log
 @ToString
-public class ArrayBlockingQueueSet<E> extends ArrayBlockingQueue<E> {
+public class ArrayBlockingSetQueue<E> extends ArrayBlockingQueue<E> {
 
     public enum FullQueuePolicy {DISCARD_LATEST, DISCARD_OLDEST}
 
@@ -23,11 +23,11 @@ public class ArrayBlockingQueueSet<E> extends ArrayBlockingQueue<E> {
     private int count;
     private long totalDelay;
 
-    public ArrayBlockingQueueSet(int capacity) throws NoSuchFieldException, IllegalAccessException {
+    public ArrayBlockingSetQueue(int capacity) throws NoSuchFieldException, IllegalAccessException {
         this(capacity, FullQueuePolicy.DISCARD_LATEST);
     }
 
-    public ArrayBlockingQueueSet(int capacity, FullQueuePolicy policy)
+    public ArrayBlockingSetQueue(int capacity, FullQueuePolicy policy)
             throws NoSuchFieldException, IllegalAccessException {
         super(capacity, true);
         this.policy = policy;
@@ -270,7 +270,7 @@ public class ArrayBlockingQueueSet<E> extends ArrayBlockingQueue<E> {
         private final Iterator<E> parentIterator;
 
         Itr() {
-            this.parentIterator = ArrayBlockingQueueSet.super.iterator();
+            this.parentIterator = ArrayBlockingSetQueue.super.iterator();
         }
 
         @Override

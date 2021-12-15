@@ -58,7 +58,7 @@ public class PaxosServer extends Node {
         super(address,
                 new ThreadPoolExecutor(MESSAGE_HANDLER_EXECUTOR_NUM_OF_THREAD,
                         MESSAGE_HANDLER_EXECUTOR_NUM_OF_THREAD, 0, TimeUnit.MILLISECONDS,
-                        new ArrayBlockingQueueSet<>(MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE),
+                        new ArrayBlockingSetQueue<>(MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE),
                         new ThreadPoolExecutor.DiscardPolicy()),
                 10);
         this.servers = servers;
@@ -176,7 +176,7 @@ public class PaxosServer extends Node {
             if (result != null) {
                 send(new PaxosReply(leader, result), result.clientAddr());
             }
-        } else if (!uncertain.contains(m.command()) && leaderRole.pendingRequests.add(m.command())) {
+        } else if (!uncertain.contains(m.command()) && leaderRole.pendingCommands.add(m.command())) {
             if (leaderRole.noPrepareReply == null) { // sending prepare requests
                 leaderRole.sendPrepare();
             } else if (leaderRole.noAcceptReply == null &&
@@ -226,11 +226,11 @@ public class PaxosServer extends Node {
                                 execute(leaderRole.maxState.getLeft().commands, leaderRole.maxState.getLeft().begin);
                                 addUncertain(leaderRole.maxState.getRight(), leaderRole.maxState.getLeft().end());
                             }
-                            if (!leaderRole.pendingRequests.isEmpty()) {
+                            if (!leaderRole.pendingCommands.isEmpty()) {
                                 leaderRole.sendAccept();
                             }
                         }
-                    } else { // prepare request rejected, adjust prepare num and resend
+                    } else { // prepare request rejected, adjust proposal num and resend
                         leaderRole.newProposal(m.maxProposalNum());
                         leaderRole.sendPrepare();
                     }
@@ -266,7 +266,7 @@ public class PaxosServer extends Node {
                             }
                             uncertain.clear();
                             leaderRole.newAccept();
-                            if (!leaderRole.pendingRequests.isEmpty()) {
+                            if (!leaderRole.pendingCommands.isEmpty()) {
                                 leaderRole.sendAccept();
                             }
                         }
@@ -284,13 +284,13 @@ public class PaxosServer extends Node {
         received(sender);
         if (!leader.equals(sender)) return;
         if (!isUpToDate(sender)) return;
-        if (m.proposalNum().compareTo(acceptorRole.maxPrepareNum) >= 0) { // respond with promise
-            acceptorRole.maxPrepareNum = m.proposalNum();
+        if (m.proposalNum().compareTo(acceptorRole.maxProposalNum) >= 0) { // respond with promise
+            acceptorRole.maxProposalNum = m.proposalNum();
             send(new PrepareReply(m.proposalNum(), executed.startFrom(serverExecuted.get(sender)), uncertain,
-                    acceptorRole.maxAcceptNum, acceptorRole.maxPrepareNum, false), sender);
+                    acceptorRole.maxAcceptNum, acceptorRole.maxProposalNum, false), sender);
         } else { // reject
             send(new PrepareReply(m.proposalNum(), null, null,
-                    acceptorRole.maxAcceptNum, acceptorRole.maxPrepareNum, false), sender);
+                    acceptorRole.maxAcceptNum, acceptorRole.maxProposalNum, false), sender);
         }
     }
 
@@ -299,7 +299,7 @@ public class PaxosServer extends Node {
         received(sender);
         if (!leader.equals(sender)) return;
         if (m.acceptNum().compareTo(acceptorRole.maxAcceptNum) >= 0) { // accept the request and sync with leader state
-            acceptorRole.maxPrepareNum = ImmutablePair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
+            acceptorRole.maxProposalNum = ImmutablePair.of(m.acceptNum().getLeft(), m.acceptNum().getMiddle());
             acceptorRole.maxAcceptNum = m.acceptNum();
             execute(m.executed().commands, m.executed().begin);
             uncertain = m.uncertain().stream()
@@ -308,7 +308,7 @@ public class PaxosServer extends Node {
             // the proposed commands may be rejected by other majority of servers, so they cannot be executed and stored
             // in uncertain
         }
-        send(new AcceptReply(m.acceptNum(), acceptorRole.maxPrepareNum, executed.end()), sender);
+        send(new AcceptReply(m.acceptNum(), acceptorRole.maxProposalNum, executed.end()), sender);
     }
 
     /* -------------------------------------------------------------------------
@@ -400,7 +400,7 @@ public class PaxosServer extends Node {
     @EqualsAndHashCode
     private class Leader implements Serializable {
 
-        HashSet<AMOCommand> pendingRequests; // requests that received but not in any phase of paxos
+        HashSet<AMOCommand> pendingCommands; // requests that received but not in any phase of paxos
         MutablePair<Integer, Address> proposalNum; // current proposal number
         int acceptRound; // the round of accept request. if prepare is succeeded, multiple rounds of accept is proceeded
         // without prepare
@@ -413,8 +413,8 @@ public class PaxosServer extends Node {
         AcceptRequestTimeout acceptTimeout;
 
         Leader() {
-            this.pendingRequests = new HashSet<>();
-            this.proposalNum = new MutablePair<>(acceptorRole.maxPrepareNum.getLeft() + 1, address());
+            this.pendingCommands = new HashSet<>();
+            this.proposalNum = new MutablePair<>(acceptorRole.maxProposalNum.getLeft() + 1, address());
             this.acceptRound = 0;
 
             this.noPrepareReply = noAcceptReply = null;
@@ -430,7 +430,7 @@ public class PaxosServer extends Node {
         }
 
         void newProposal(Pair<Integer, Address> num) {
-            pendingRequests.addAll(uncertain); // all uncertain commands enter pendingRequest to start all over
+            pendingCommands.addAll(uncertain); // all uncertain commands enter pendingRequest to start all over
             uncertain.clear();
             ++this.proposalNum.left;
             acceptRound = 0;
@@ -455,13 +455,13 @@ public class PaxosServer extends Node {
                 prepareTimeoutSet = true;
                 set(prepareTimeout);
             }
-            acceptorRole.maxPrepareNum = ImmutablePair.of(proposalNum);
+            acceptorRole.maxProposalNum = ImmutablePair.of(proposalNum);
             broadcast(new PrepareRequest(ImmutablePair.of(proposalNum), executed.end()), noPrepareReply);
         }
 
         void sendAccept() {
-            uncertain.addAll(pendingRequests); // all pending requests enter uncertain and fixed
-            pendingRequests.clear();
+            uncertain.addAll(pendingCommands); // all pending requests enter uncertain and fixed
+            pendingCommands.clear();
             this.noAcceptReply = new HashSet<>(serverExecuted.keySet());
             if (!acceptTimeoutSet) {
                 acceptTimeoutSet = true;
@@ -482,11 +482,11 @@ public class PaxosServer extends Node {
     @EqualsAndHashCode
     private class Acceptor implements Serializable {
 
-        ImmutablePair<Integer, Address> maxPrepareNum; // maximum prepare num
-        ImmutableTriple<Integer, Address, Integer> maxAcceptNum; // maximum accept num (prepare num + accept round)
+        ImmutablePair<Integer, Address> maxProposalNum; // maximum proposal num
+        ImmutableTriple<Integer, Address, Integer> maxAcceptNum; // maximum accept num (proposal num + accept round)
 
         Acceptor() {
-            maxPrepareNum = ImmutablePair.of(-1, address());
+            maxProposalNum = ImmutablePair.of(-1, address());
             maxAcceptNum = ImmutableTriple.of(-1, address(), 0);
         }
 
@@ -606,7 +606,7 @@ public class PaxosServer extends Node {
                         executed.commands.add(command);
                         uncertain.remove(command);
                         if (leaderRole != null) {
-                            leaderRole.pendingRequests.remove(command);
+                            leaderRole.pendingCommands.remove(command);
                         }
                     });
         }

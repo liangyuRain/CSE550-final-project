@@ -46,7 +46,7 @@ public class ConnectionPool implements Closeable, AutoCloseable {
     private final BiConsumer<Message, Address> messageHandler;
     private boolean closed = false;
 
-    private final ArrayBlockingQueueSet<Package> outboundPackages;
+    private final ArrayBlockingSetQueue<Package> outboundPackages;
     private final Address address;
     private final Address to;
 
@@ -77,10 +77,10 @@ public class ConnectionPool implements Closeable, AutoCloseable {
         this.outPkgCounter = new LongAdder();
         this.inPkgCounter = new LongAdder();
 
-        ArrayBlockingQueueSet<Package> outboundPackages = null;
+        ArrayBlockingSetQueue<Package> outboundPackages = null;
         try {
-            outboundPackages = new ArrayBlockingQueueSet<>(packageQueueCapacity,
-                    ArrayBlockingQueueSet.FullQueuePolicy.DISCARD_OLDEST);
+            outboundPackages = new ArrayBlockingSetQueue<>(packageQueueCapacity,
+                    ArrayBlockingSetQueue.FullQueuePolicy.DISCARD_OLDEST);
         } catch (Throwable e) {
             log(e);
             System.exit(1);
