@@ -6,7 +6,6 @@ import org.apache.commons.lang3.tuple.Pair;
 import java.io.*;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
-import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -54,7 +53,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
 
     private final AtomicLong counter;
     private final ConcurrentHashMap<Long, Socket> connections;
-    private final ConcurrentHashMap<Long, Long> lastReceival;
 
     private final LongAdder outPkgCounter, inPkgCounter;
 
@@ -72,7 +70,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
         this.messageHandler = messageHandler;
 
         this.connections = new ConcurrentHashMap<>();
-        this.lastReceival = new ConcurrentHashMap<>();
         this.counter = new AtomicLong();
         this.outPkgCounter = new LongAdder();
         this.inPkgCounter = new LongAdder();
@@ -89,7 +86,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
 
         if (!to.equals(address)) {
             executor.execute(new ConnectionCreationTask());
-            executor.execute(new ConnectionMonitorTask());
         }
 
         log(Level.FINER, "Created ConnectionPool");
@@ -190,40 +186,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
 
     }
 
-    private class ConnectionMonitorTask implements Runnable {
-
-        @Override
-        public void run() {
-            try {
-                ArrayList<Long> timedOutConnections = new ArrayList<>();
-                for (; ; ) {
-                    long now = System.currentTimeMillis();
-                    for (Map.Entry<Long, Long> entry : lastReceival.entrySet()) {
-                        long id = entry.getKey();
-                        long timestamp = entry.getValue();
-                        if (now - timestamp > TEST_ALIVE_TIMEOUT) {
-                            log(Level.SEVERE, String.format("Connection %d not alive", id));
-                            timedOutConnections.add(id);
-                        }
-                    }
-                    synchronized (connections) {
-                        timedOutConnections.forEach(ConnectionPool.this::closeConnection);
-                    }
-                    timedOutConnections.clear();
-                    Thread.sleep(TEST_ALIVE_INTERVAL);
-
-                    if (Thread.interrupted()) throw new InterruptedException();
-                }
-            } catch (InterruptedException e) {
-                log(Level.SEVERE, String.format("%s interrupted", this.getClass().getSimpleName()));
-            } catch (Throwable e) {
-                log(e);
-                System.exit(1);
-            }
-        }
-
-    }
-
     public void addConnection(Socket skt) {
         try {
             long id = addConnectionInternal(skt, false);
@@ -255,7 +217,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
             }
             id = counter.getAndIncrement();
             connections.put(id, skt);
-            lastReceival.put(id, System.currentTimeMillis());
             executor.execute(new SendTask(id, writePortFirst, logHandler));
             executor.execute(new ReceiveTask(id, logHandler));
         }
@@ -267,7 +228,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
 
     public void closeConnection(long id) {
         log(Level.FINEST, String.format("Closing connection %d", id));
-        lastReceival.remove(id);
         Socket skt = connections.remove(id);
         if (skt != null) {
             try {
@@ -408,33 +368,40 @@ public class ConnectionPool implements Closeable, AutoCloseable {
             try {
                 Socket skt = connections.get(id);
                 if (skt == null) return;
-                try (ObjectInputStream sktInput =
-                             new ObjectInputStream(new BufferedInputStream(skt.getInputStream()))) {
-                    for (; ; ) {
-                        Package pkg;
-                        try {
-                            pkg = (Package) sktInput.readObject();
-                        } catch (ClassNotFoundException | IOException e) {  // Incomplete package?
-                            log(Level.SEVERE, String.format("Receive failed with %s", e));
-                            return;
-                        }
-                        lastReceival.put(id, System.currentTimeMillis());
-                        Message message = pkg.message();
-                        Address sender = pkg.sender();
-                        log(message.logLevel(), String.format("Got package from %s: %s", sender.hostname(), pkg));
-                        if (!(message instanceof TestAlive)) {
-                            messageHandler.accept(message, sender);
-                            inPkgCounter.increment();
-                        }
-                        if (!connections.containsKey(id)) {
-                            log(Level.SEVERE, "Connection has been closed");
-                            return;
-                        }
-
-                        if (Thread.interrupted()) throw new InterruptedException();
+                try {
+                    try {
+                        skt.setSoTimeout(TEST_ALIVE_TIMEOUT);
+                    } catch (SocketException e) {
+                        log(Level.SEVERE, String.format("%s setSoTimeout failed", skt));
+                        return;
                     }
-                } catch (IOException e) {
-                    log(Level.SEVERE, String.format("Constructing ObjectInputStream failed with %s", e));
+                    try (ObjectInputStream sktInput =
+                                 new ObjectInputStream(new BufferedInputStream(skt.getInputStream()))) {
+                        for (; ; ) {
+                            Package pkg;
+                            try {
+                                pkg = (Package) sktInput.readObject();
+                            } catch (ClassNotFoundException | IOException e) {  // Incomplete package?
+                                log(Level.SEVERE, String.format("Receive failed with %s", e));
+                                return;
+                            }
+                            Message message = pkg.message();
+                            Address sender = pkg.sender();
+                            log(message.logLevel(), String.format("Got package from %s: %s", sender.hostname(), pkg));
+                            if (!(message instanceof TestAlive)) {
+                                messageHandler.accept(message, sender);
+                                inPkgCounter.increment();
+                            }
+                            if (!connections.containsKey(id)) {
+                                log(Level.SEVERE, "Connection has been closed");
+                                return;
+                            }
+
+                            if (Thread.interrupted()) throw new InterruptedException();
+                        }
+                    } catch (IOException e) {
+                        log(Level.SEVERE, String.format("Constructing ObjectInputStream failed with %s", e));
+                    }
                 } finally {
                     closeConnection(id);
                 }
