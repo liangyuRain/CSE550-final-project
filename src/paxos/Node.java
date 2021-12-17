@@ -28,7 +28,7 @@ public class Node {
     private final int packageQueueCapacity;
 
     private final ScheduledExecutorService scheduledExecutor;
-    private final ExecutorService dynamicExecutor;
+    private final ThreadPoolExecutor dynamicExecutor;
     protected final ThreadPoolExecutor messageHandlerExecutor;
 
     private final LogHandler logHandler;
@@ -52,7 +52,7 @@ public class Node {
         this.lastActivity = new ConcurrentHashMap<>();
 
         this.scheduledExecutor = Executors.newScheduledThreadPool(5);
-        this.dynamicExecutor = Executors.newCachedThreadPool();
+        this.dynamicExecutor = (ThreadPoolExecutor) Executors.newCachedThreadPool();
         this.messageHandlerExecutor = messageHandlerExecutor;
 
         this.scheduledExecutor.scheduleWithFixedDelay(() -> {
@@ -112,6 +112,7 @@ public class Node {
                                     address,
                                     k,
                                     packageQueueCapacity,
+                                    dynamicExecutor,
                                     logHandler,
                                     this::handleMessage))
                     .addConnection(clientSocket);
@@ -141,7 +142,7 @@ public class Node {
 
     protected final void send(Message message, Address to) {
         addrToConn.computeIfAbsent(to, k -> new ConnectionPool(
-                address, k, packageQueueCapacity, logHandler, this::handleMessage)).send(message);
+                address, k, packageQueueCapacity, dynamicExecutor, logHandler, this::handleMessage)).send(message);
         lastActivity.compute(to, (k, t) -> Math.max(System.currentTimeMillis(), t == null ? Integer.MIN_VALUE : t));
     }
 
@@ -301,7 +302,7 @@ public class Node {
 
     private static final BiFunction<ThreadPoolExecutor, String, String> logThreadPool = (executor, info) ->
             String.format(
-                    "%s info: Queue size: %d, Num of active thread: %d, Pool size: %d, Core pool size: %d",
+                    "%s info: Queue size: %d, Num of active threads: %d, Pool size: %d, Core pool size: %d",
                     info,
                     executor.getQueue().size(),
                     executor.getActiveCount(),
@@ -363,6 +364,8 @@ public class Node {
         sb.append(System.lineSeparator());
         sb.append(System.lineSeparator());
 
+        sb.append(logThreadPool.apply(dynamicExecutor, "DynamicExecutor"));
+        sb.append(System.lineSeparator());
         sb.append(logThreadPool.apply(messageHandlerExecutor, "MessageHandlerExecutor"));
     }
 

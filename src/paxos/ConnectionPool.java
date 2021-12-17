@@ -5,6 +5,7 @@ import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.*;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -59,6 +60,7 @@ public class ConnectionPool implements Closeable, AutoCloseable {
     public ConnectionPool(Address address,
                           Address to,
                           int packageQueueCapacity,
+                          ExecutorService executor,
                           LogHandler logHandler,
                           BiConsumer<Message, Address> messageHandler) {
         this.logHandler = logHandler.derivative(String.format("[ConnectionPool %s]", to.hostname()));
@@ -66,7 +68,7 @@ public class ConnectionPool implements Closeable, AutoCloseable {
 
         this.address = address;
         this.to = to;
-        this.executor = Executors.newCachedThreadPool();
+        this.executor = executor;
         this.messageHandler = messageHandler;
 
         this.connections = new ConcurrentHashMap<>();
@@ -110,7 +112,7 @@ public class ConnectionPool implements Closeable, AutoCloseable {
             log(Level.FINER, "Closing ConnectionPool");
             synchronized (connections) {
                 closed = true;
-                executor.shutdownNow();
+                connections.notifyAll();
                 outboundPackages.clear();
                 for (Map.Entry<Long, Socket> entry : connections.entrySet()) {
                     long id = entry.getKey();
@@ -156,7 +158,7 @@ public class ConnectionPool implements Closeable, AutoCloseable {
                             }
                         }
                     }
-
+                    if (closed) return;
                     try {
                         log(Level.FINEST, "Creating connection");
                         Socket skt = new Socket();
@@ -173,11 +175,7 @@ public class ConnectionPool implements Closeable, AutoCloseable {
                         log(Level.SEVERE, String.format("Create connection to %s failed with %s", to.hostname(), e));
                         Thread.sleep(RECONNECT_INTERVAL);
                     }
-
-                    if (Thread.interrupted()) throw new InterruptedException();
                 }
-            } catch (InterruptedException e) {
-                log(Level.SEVERE, String.format("%s interrupted", this.getClass().getSimpleName()));
             } catch (Throwable e) {
                 log(e);
                 System.exit(1);
@@ -304,6 +302,7 @@ public class ConnectionPool implements Closeable, AutoCloseable {
                         for (; ; ) {
                             log(Level.FINEST, "Waiting for new package");
                             Package pkg = outboundPackages.poll(TEST_ALIVE_INTERVAL, TimeUnit.MILLISECONDS);
+                            if (closed) return;
                             if (!connections.containsKey(id)) {
                                 log(Level.SEVERE, "Connection has been closed");
                                 return;
@@ -327,8 +326,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
                                 log(Level.SEVERE, String.format("Send failed with %s: %s", e, pkg));
                                 return;
                             }
-
-                            if (Thread.interrupted()) throw new InterruptedException();
                         }
                     }
                 } catch (IOException e) {
@@ -336,8 +333,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
                 } finally {
                     closeConnection(id);
                 }
-            } catch (InterruptedException e) {
-                log(Level.SEVERE, String.format("%s interrupted", this.getClass().getSimpleName()));
             } catch (Throwable e) {
                 log(e);
                 System.exit(1);
@@ -385,6 +380,7 @@ public class ConnectionPool implements Closeable, AutoCloseable {
                                 log(Level.SEVERE, String.format("Receive failed with %s", e));
                                 return;
                             }
+                            if (closed) return;
                             Message message = pkg.message();
                             Address sender = pkg.sender();
                             log(message.logLevel(), String.format("Got package from %s: %s", sender.hostname(), pkg));
@@ -396,8 +392,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
                                 log(Level.SEVERE, "Connection has been closed");
                                 return;
                             }
-
-                            if (Thread.interrupted()) throw new InterruptedException();
                         }
                     } catch (IOException e) {
                         log(Level.SEVERE, String.format("Constructing ObjectInputStream failed with %s", e));
@@ -405,8 +399,6 @@ public class ConnectionPool implements Closeable, AutoCloseable {
                 } finally {
                     closeConnection(id);
                 }
-            } catch (InterruptedException e) {
-                log(Level.SEVERE, String.format("%s interrupted", this.getClass().getSimpleName()));
             } catch (Throwable e) {
                 log(e);
                 System.exit(1);
