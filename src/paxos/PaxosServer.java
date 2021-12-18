@@ -215,17 +215,8 @@ public class PaxosServer extends Node {
                                 prevAcceptorState = null;
                             }
                             // sync with max accepted number acceptor's state, including the uncertain one.
-                            // It is guaranteed in the protocol that the acceptor with highest accepted number is
-                            // majority.
-                            if (leaderRole.maxAcceptedNum.getMiddle().equals(address())) {
-                                execute(leaderRole.maxState.getLeft().commands, leaderRole.maxState.getLeft().begin);
-                                execute(leaderRole.maxState.getRight(), leaderRole.maxState.getLeft().end());
-                            } else {
-                                // the leader issue the max accept number has crashed, and its accept request may only
-                                // be accepted by minority. Therefore, cannot directly execute the state.
-                                execute(leaderRole.maxState.getLeft().commands, leaderRole.maxState.getLeft().begin);
-                                addUncertain(leaderRole.maxState.getRight(), leaderRole.maxState.getLeft().end());
-                            }
+                            execute(leaderRole.maxState.getLeft().commands, leaderRole.maxState.getLeft().begin);
+                            addUncertain(leaderRole.maxState.getRight(), leaderRole.maxState.getLeft().end());
                             if (!leaderRole.pendingCommands.isEmpty()) {
                                 leaderRole.sendAccept();
                             }
