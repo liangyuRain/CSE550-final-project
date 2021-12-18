@@ -392,4 +392,7 @@ The current implementation of \verb|PaxosServer| uses Java \verb|synchronized| k
 \subsection{Write Commands to Disk}
 In \S\ref{sec:gc}, we mentioned that if all servers have executed the command in \verb|Slot| $n$, then the command is garbage collected and removed from memory. Thus, the \verb|PaxosServer| can continuously process commands without running out of memory. In some cases, when some server is down for too long, the number of commands in alive servers is continuously built up. To prevent running out of memory, the current design stops the servers from processing new commands if the number of commands in memory exceeds some point. At that time, only if the failed server is recovered, the commands in servers can be garbage collected and then processing new commands. In such situation, one may want the alive servers to continue processing commands while storing the commands in disk. When the failed server is alive again, the other servers can read commands from disk to help the failed server recover. Furthermore, one may want all the commands written to disk for the purpose of logging or debugging.
 
+\section{Video Presentation}
+\href{https://docs.google.com/presentation/d/1192LrW-3ghr3KgephdUU2Qoq6YV4TLW0sjI2FiVfeSE/edit?usp=sharing}{Google Slides}
+
 \end{document}
