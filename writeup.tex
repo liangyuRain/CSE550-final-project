@@ -1,0 +1,395 @@
+\documentclass{article}
+\usepackage{tgbonum}
+\usepackage{tikz}
+\usetikzlibrary{snakes,arrows,shapes,calc,positioning}
+\usepackage{amsmath, amssymb, graphicx, geometry, listings, verbatim, enumerate, relsize, algorithmicx, tikz}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{mathdots}
+\usepackage{mathrsfs}
+\usepackage{mathtools}
+\usepackage{subcaption}
+\usepackage{diagbox}
+
+\let\counterwithout\relax
+\let\counterwithin\relax
+\usepackage{chngcntr}
+
+\geometry{left=1.5cm, right=1.5cm, top=2.5cm, bottom=2.5cm}
+
+\usepackage[noend]{algpseudocode}
+\usepackage[ruled, vlined, linesnumbered]{algorithm2e}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{amsthm}
+\usepackage{pdfpages}
+\usepackage{fancyhdr}
+\usepackage[shortlabels]{enumitem}
+\usepackage{pdflscape}
+\pagestyle{fancy}
+\lhead{\textbf{Name:} Liangyu Zhao}
+\chead{\textbf{Final Project Writeup}}
+\rhead{CSE550 AU21}
+\author{Liangyu Zhao \\ \texttt{liangyu@cs.washington.edu}}
+\date{December 14th, 2021}
+\title{%
+CSE550 Final Project Writeup \\
+\large Paxos State Machine Design \\
+and Implementation}
+
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+\newcommand*\diff{\mathop{}\!\mathrm{d}}
+
+\newcommand{\cur}[1]{\left\{#1\right\}}
+\newcommand{\para}[1]{\left(#1\right)}
+\newcommand{\brac}[1]{\left[#1\right]}
+\newcommand{\abs}[1]{\left|#1\right|}
+\newcommand{\norm}[1]{\left\Vert #1\right\Vert}
+\newcommand{\mbf}[1]{\mathbf{#1}}
+\newcommand{\stack}[1]{\begin{tabular}{c}#1\end{tabular}}
+
+\DeclareMathOperator{\N}{\mathbb{N}}
+\DeclareMathOperator{\R}{\mathbb{R}}
+\DeclareMathOperator{\C}{\mathbb{C}}
+\DeclareMathOperator{\Q}{\mathbb{Q}}
+\DeclareMathOperator{\Z}{\mathbb{Z}}
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\I}{\mathbb{I}}
+
+\DeclareMathOperator{\cR}{\mathcal{R}}
+\DeclareMathOperator{\cL}{\mathcal{L}}
+\DeclareMathOperator{\cA}{\mathcal{A}}
+\DeclareMathOperator{\cB}{\mathcal{B}}
+\DeclareMathOperator{\cC}{\mathcal{C}}
+\DeclareMathOperator{\cD}{\mathcal{D}}
+\DeclareMathOperator{\cP}{\mathcal{P}}
+
+\DeclareMathOperator{\textdef}{def}
+
+\DeclareMathOperator{\bin}{Bin}
+\DeclareMathOperator{\geo}{Geometric}
+\DeclareMathOperator{\uni}{Unif}
+\DeclareMathOperator{\weib}{Weib}
+\DeclareMathOperator{\pois}{Pois}
+\DeclareMathOperator{\expo}{Exp}
+\DeclareMathOperator{\ber}{Ber}
+\DeclareMathOperator{\length}{length}
+\DeclareMathOperator{\opt}{OPT}
+\DeclareMathOperator{\dist}{d}
+
+\DeclareMathOperator{\lcm}{lcm}
+
+\newcommand*{\defeq}{\stackrel{\textdef}{=}}
+
+\def\upint{\mathchoice%
+    {\mkern13mu\overline{\vphantom{\intop}\mkern7mu}\mkern-20mu}%
+    {\mkern7mu\overline{\vphantom{\intop}\mkern7mu}\mkern-14mu}%
+    {\mkern7mu\overline{\vphantom{\intop}\mkern7mu}\mkern-14mu}%
+    {\mkern7mu\overline{\vphantom{\intop}\mkern7mu}\mkern-14mu}%
+  \int}
+\def\lowint{\mkern3mu\underline{\vphantom{\intop}\mkern7mu}\mkern-10mu\int}
+
+\newcommand{\Rint}{\mathop{\mathrlap{\pushR}}\!\int}
+\newcommand{\pushR}{\mathchoice
+  {\mkern2.5mu\cR}
+  {\scriptstyle\cR}
+  {\scriptscriptstyle\cR}
+  {\scriptscriptstyle\cR}
+}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}{Corollary}[theorem]
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{note}[theorem]{Note}
+\newtheorem{remark}[theorem]{Remark}
+\newtheorem{assertion}[theorem]{Assertion}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{conjecture}[theorem]{Conjecture}
+
+\newenvironment{bfproof}{%
+  \begin{proof}[\textbf{Proof}]%
+}{%
+  \end{proof}%
+}
+\newenvironment{subproof}[1][\proofname]{%
+  \renewcommand{\qedsymbol}{$\square$}%
+  \begin{proof}[#1]%
+}{%
+  \end{proof}%
+}
+\newenvironment*{dummyenv}{}{}
+\newenvironment{answer}{%
+  \renewcommand{\qedsymbol}{}%
+  \begin{proof}[\text{Solution}]%
+}{%
+  \end{proof}%
+}
+\renewcommand\qedsymbol{$\blacksquare$}
+
+\numberwithin{equation}{section}
+
+\setlength{\parindent}{0em}
+
+\hypersetup{colorlinks,linkcolor=,urlcolor=blue}
+
+\begin{document}
+
+\maketitle
+
+\newpage
+
+\tableofcontents
+
+\newpage
+
+\section{Introduction}
+
+This project is an implementation of Paxos state machine from TCP networking to Paxos protocols. Besides standard Paxos algorithm, the implementation adopts two efficiency improvements described in the \href{https://youtu.be/JEpsBg0AO6o?t=2615}{video} by Diego Ongaro: (1) electing leader as the sole proposer, and (2) skipping \verb|PrepareRequest|s once the initial one is accepted. Besides efficiency, the implementation can also handle temporary server failure to: (1) continue processing client requests when minority of servers fail, and (2) recover failed server to the latest state.
+
+\section{CSE 452 DsLabs}
+
+The design of the framework including the layout of \verb|Node|, \verb|Application|, \verb|Message|, and \verb|Timeout| is borrowed from the \href{https://github.com/emichael/dslabs}{DsLabs} by Ellis Michael. While the framework of Michael gives author ideas how to layout different elements, the implementation by Michael was only intended to run distributed systems lab assignments on one machine. Thus, the actual implementation to run a Paxos system truly distributed is done by author himself in this project.\\
+
+Many of the designs of Paxos like batched commands and garbage collection are from the DsLabs assignments done by author when he was taking the course CSE 452 at the University of Washington. The previous implementation is modified to work in a truly distributed environment. In addition, ideas like ``up-to-date state'' and ``\verb|Recover| message'' are newly designed and implemented in this project.
+
+\section{Design}
+
+\subsection{Assumptions}
+The design makes the following assumptions:
+\begin{enumerate}[(I)]
+	\item The design assumes a non-Byzantine scenario.
+	\item The number of servers in a Paxos group is fixed.
+	\item\label{ass:3} A server only fails by being unable to send or receive any message to or from any other parties.
+	\item\label{ass:4} A server recovered from a failure is in the state right before the failure.
+	\item\label{ass:5} A client will submit a new request only after the previous request got replied by some server.
+\end{enumerate}
+In essence, the assumptions \ref{ass:3} and \ref{ass:4} forbid that following scenarios:
+\begin{itemize}
+	\item Server/client $a$ can receive message from server/client $b$ but $b$ cannot receive message from $a$.
+	\item Server/client $a$ can communicate with server/client $c$ but server/client $b$ cannot communicate with $c$.
+	\item Server $a$ has gone from state $n$ to $n+1$ before experiencing a failure. After recovered from the failure, server $a$ is back to state $n$ or any earlier state.
+\end{itemize}
+The assumptions are reasonable by the nature of TCP and non-volatile computer memory.
+
+\subsection{Alive or Dead}
+Assumption \ref{ass:3} effectively restricts a server into two conditions:
+\begin{itemize}
+	\item \textbf{Alive:} The server is available in the network. An alive server is reachable from all other alive servers/clients, and all other alive servers/clients are reachable from the server.
+	\item \textbf{Dead:} The server is unavailable in the network. A dead server is unreachable from all other servers/clients, and all other servers/clients are unreachable from the server.
+\end{itemize}
+Note that the perception of a server being ``alive'' or ``dead'' may be different by individual servers. An alive server is perceived as alive by every other alive server but not the dead ones. A dead server with network failure perceives every other server as dead but itself as alive.
+
+\subsubsection{Ping}
+Every server in the Paxos group is broadcasting a \verb|Ping| \verb|Message| every \verb|PingTimeout|\footnote{currently set to 100ms.}. The \verb|Ping| serves two purposes:
+\begin{itemize}
+	\item If a server $a$ has not received any \verb|Message| from another server $b$ for two \verb|PingTimeout|s, then $b$ is determined dead by server $a$.
+	\item The \verb|Ping| \verb|Message| contains the sender's knowledge about which \verb|Slot| each server has executed in the Paxos group. This can help other servers garbage collect executed commands, which will be further discussed in \S\ref{sec:gc}.
+\end{itemize}
+
+\subsection{Deterministic State Machine}
+The project implements a Paxos state machine. The state transition is caused by executing a command submitted by a client. Because the state transition is deterministic, the state of a server can be described as an ordered list of commands executed by the server. In our design, the list is made of \verb|Slot|s filled with commands. The decision of filling which command into which \verb|Slot| is decided through Paxos algorithm. A \verb|Slot| can be executed if and only if (1) all previous \verb|Slot|s are executed and (2) the majority of the servers have consensus on which command to be filled into the \verb|Slot|. We say a server is at state $n$ if it has executed the $n$th \verb|Slot| and has not yet executed the $(n+1)$st \verb|Slot|.
+
+\subsubsection{Up-to-date or Stale}
+Because of some failure, a server may be stuck at state $n$, while other servers have already got to state $n+d$. Once the server is recovered from the failure, by assumption \ref{ass:4}, it is now still at state $n$. Even though \verb|PrepareReply| and \verb|AcceptRequest| can sync the server with the latest state, if $d$ is too large, it is infeasible for \verb|PrepareReply| or \verb|AcceptRequest| to help the server catch up. A constant \verb|MAX_NUM_OF_COMMAND_PER_MESSAGE|\footnote{currently set to 10k.} is defined such that if $d>\verb|MAX_NUM_OF_COMMAND_PER_MESSAGE|$, then the server is ``stale''; otherwise, if $d\leq\verb|MAX_NUM_OF_COMMAND_PER_MESSAGE|$, then the server is ``up-to-date''. If a server is found to be stale, it is excluded from the Paxos group until some other server has helped it catch up to be up-to-date.\\
+
+Note that the perception of a server being ``up-to-date'' or ``stale'' may be different by individual servers. Because each server may have a different latest state number as far as it has known, server $a$ may be perceived as up-to-date by server $b$ but not by server $c$.
+
+\subsubsection{Recovering}
+When a server is stale, other servers will try to recover it to the latest state. To do this, another server will send a \verb|Recover| message to the stale server containing the commands it has missed. The number of commands in one \verb|Recover| message is limited by \verb|MAX_NUM_OF_COMMAND_PER_MESSAGE|, so if the stale server has missed too many commands, these commands will be divided into batches and send to the stale server one by one.\\
+
+Sending the \verb|Recover| message requires the sender to copy a large number of commands, which is an expensive operation. Thus, any alive server is responsible to recover exactly one other alive server. The responsibility is decided by forming all non-leader alive servers as a ring by their addresses. Each non-leader alive server is responsible for the next higher addressed non-leader alive server. The reason why leader is not involved in this ring is to ensure the liveness of the leader. Also, the leader election rule (\ref{electInv}) introduced later guarantees that leader is always up-to-date, so it does not need to be recovered. However, one exception is when leader is the only one up-to-date among all alive servers. In such case, the leader will begin to recover the next higher addressed alive server.
+
+\subsubsection{Garbage Collection}\label{sec:gc}
+An implication of assumption \ref{ass:4} is that if every server has executed the $n$th \verb|Slot|, then any info about $n$th \verb|Slot| is no longer needed. In fact, the only reason why we need to remember what is the command chosen for a \verb|Slot| is to inform the servers who does not know. Thus, in order to save memory space, if a server finds out every one has executed the $n$th \verb|Slot|, it will then garbage collect any \verb|Slot|s from the $1$st to $n$th one still in memory.
+
+\subsection{Leader Election}
+The design uses a leader election mechanism to ensure liveness. Only the leader can process the requests from clients, send \verb|PrepareRequest|s, send \verb|AcceptRequest|s, and reply to clients with results. There is exactly one leader recognized by the majority of servers if the majority of the servers are alive. In particular, server $a$ is recognized as the leader by server $b$ if and only if
+\begin{equation}\label{electInv}
+	\text{$a$ has the highest address among all servers that are alive and up-to-date by $b$'s perception.}
+\end{equation}
+If a server finds itself satisfying (\ref{electInv}) by its perception, then it promotes itself as the leader. Because of periodical \verb|Ping|, aliveness and staleness are frequently syncing among all alive servers. It is unlikely to have two leaders among all alive servers for any time period longer than \verb|PingTimeout|.
+
+\subsection{Paxos Protocol}\label{sec:paxos}
+The design follows the framework given in Lamport's paper but with some improvements. The complete life cycle of a command follows the following requests/replies:
+\begin{itemize}
+	\item \verb|PaxosRequest|: The client submits the command in a \verb|PaxosRequest|. The client broadcasts the \verb|PaxosRequest| to every server in the Paxos group.
+	\item \verb|PrepareRequest|: After receiving the \verb|PaxosRequest|, the leader will broadcast a \verb|PrepareRequest| to every other server in the Paxos group.
+	\item \verb|PrepareReply|: After receiving the \verb|PrepareRequest| from the leader, a server will send a \verb|PrepareReply| back to leader saying either accepting the proposal or rejecting the proposal.
+	\item \verb|AcceptRequest|: If the leader has majority of the servers accepting the proposal in \verb|PrepareReply|, it will broadcast an \verb|AcceptRequest| with the client command.
+	\item \verb|AcceptReply|: After receiving the \verb|AcceptRequest| from the leader, a server will similarly send an \verb|AcceptReply| back to leader saying either accepting or rejecting.
+	\item \verb|PaxosReply|: If the leader has majority of the servers accepting in \verb|AcceptReply|, it will execute the client's command and send the client \verb|PaxosReply| with the result.
+\end{itemize}
+
+\subsubsection{Batched Commands}\label{sec:batch}
+The design runs a multi-instance Paxos algorithm in a batched fashion. Suppose the leader is at state $n$. A single instance of Paxos algorithm will decide the commands from $(n+1)$st to $(n+1+d)$th \verb|Slot|. Typically, the commands are the \verb|pendingCommands| as far as the leader has received right before sending the \verb|AcceptRequest|. Until this instance of Paxos succeeds or be abandoned, the leader will not initiate another instance. In the meantime, all newly received commands from clients enter \verb|pendingCommands|, which will be decided during the next instance.\\
+
+All commands received by the leader are organized in three data structures:
+\begin{itemize}
+	\item \verb|executed|: This is an ordered list of commands that majority of the servers have reached consensus on and hence executed. While the number of commands in \verb|executed| may decrease as a result of garbage collection described in \S\ref{sec:gc}, the data structure keeps track of the \verb|Slot| numbers of the commands. If the \verb|Slot| number of the last command is $n-1$, then the server is at state $n$.\footnote{The Slot number starts from $0$, so the Slot numbered $n-1$ is the $n$th Slot.}
+	\item \verb|uncertain|: This is an ordered set of commands, but unlike \verb|executed|, these are the proposed commands for \verb|Slot|s immediately after the end of \verb|executed| that no majority of the servers have reached consensus on. Suppose the last \verb|Slot| of \verb|executed| is numbered $n-1$, and \verb|uncertain| has size $d$, then the commands in \verb|uncertain| are the proposed commands for \verb|Slot|s $n$ to $n-1+d$.
+	\item \verb|pendingCommands|: This is an unordered set of commands. When previous batch has been proposed but not yet settled, all newly received commands will be collected in \verb|pendingCommands| to be proposed during the next Paxos instance.
+\end{itemize}
+
+\subsubsection{PrepareRequest \& PrepareReply}
+\paragraph{PrepareRequest}\verb|PrepareRequest| contains a proposal number: \verb|<num,address>|. The \verb|address| is always equal to the leader/sender. This ensures that every leader sends a distinct proposal number. The comparison between any two proposal numbers trivially follows lexicographical order. When a leader sends \verb|PrepareRequest|, it will adjust the \verb|num| field to ensure this is the highest proposal number as far as it has known.
+
+\paragraph{PrepareReply}When received \verb|PrepareRequest|, the server will firstly check whether the sender is indeed the leader and up-to-date by the server's perception. If any of these two requirements fails, the server will simply ignore this \verb|PrepareRequest|. If both requirements are satisfied, the server will compare the proposal number against the highest one as far as it knows. There are two cases:
+\begin{itemize}
+	\item \textit{The received proposal number is higher than the highest one.} The server will accept this proposal. In Lamport's paper, the acceptor is required to respond with the value $v$ of the previous highest-numbered proposal. In our case, the value $v$ is the combination of $\verb|executed|+\verb|uncertain|$.
+	\item \textit{The received proposal number is lower than the highest one.} The server simply rejects the proposal by replying with its \verb|maxProposalNum|, which is higher than the received proposal number in this case. 
+\end{itemize}
+
+\subsubsection{Skip PrepareRequest}\label{sec:skip}
+After a \verb|PrepareRequest| is accepted by majority of the acceptors, an optimization is to allow the leader issuing multiple rounds of \verb|AcceptRequest|s without \verb|PrepareRequest|s until some \verb|AcceptRequest| is rejected by some acceptor. The \verb|AcceptRequest| number is in the form \verb|<num,address,round>|, where the first two fields are from the accepted proposal number, and \verb|round| is the round number of the \verb|AcceptRequest|.\\
+
+One way to think about why we can skip the \verb|PrepareRequest| is that when the leader at state $n$ issues a \verb|PrepareRequest|, the leader is issuing a proposal number for \verb|Slot|s $n$ to $\infty$. Thus, subsequent \verb|AcceptRequest|s are simply giving values to \verb|Slot|s that have already passed the phase 1 in Lamport's paper.
+
+\subsubsection{AcceptRequest \& AcceptReply}
+\paragraph{AcceptRequest}When received \verb|PrepareReply|, the leader will check the \verb|maxProposalNum| field. If it is higher than its proposal number, then the leader will initiate a new \verb|PrepareRequest|. Otherwise, the leader considers the proposal accepted. After majority of the acceptors reply with proposal accepted, the leader then sync $\verb|executed|+\verb|uncertain|$ to the \verb|PrepareReply| with highest \verb|maxAcceptedNum|. Note that since the first two fields of \verb|maxAcceptedNum| are borrowed from the corresponding proposal number. The highest \verb|maxAcceptedNum| is guaranteed to come from the highest-numbered proposal.\\
+
+The leader then sends \verb|AcceptRequest|. The leader appends all \verb|pendingCommands| to the end of \verb|uncertain| it got from \verb|PrepareReply|. The \verb|AcceptRequest| contains the new $\verb|executed|+\verb|uncertain|$ representing the chosen values of leader. The \verb|AcceptRequest| number \verb|<num,address,round>| is described in \S\ref{sec:skip}.
+
+\paragraph{AcceptReply}If the acceptor has not received a higher-numbered proposal, it syncs with the \verb|AcceptRequest|'s $\verb|executed|+\verb|uncertain|$ and reply with acceptance; if the acceptor has received a higher-numbered proposal, it simply reply with the higher \verb|maxProposalNum| to indicate a rejection.
+
+\paragraph{Reply Client}After \verb|AcceptRequest| is accepted by the majority of the acceptors, the leader then execute all commands in \verb|uncertain|, since these values have the consensus of majority. The execution results are sent to the clients in \verb|PaxosReply|.
+
+\subsection{Lock Service}\label{sec:lockservice}
+The lock service in this implementation supports three operations: \verb|lock|, \verb|unlock|, and \verb|query|. The design supports \verb|lock| and \verb|unlock| multiple locks at the same time. Suppose client submits a request to \verb|lock| a set of locks $U$, then the rule of \verb|lock| is as followed:
+\begin{enumerate}[(a)]
+	\item If the client is currently holding some lock not in $U$, then the \verb|lock| request fails;
+	\item If any lock in $U$ is locked by some other client right now, then the \verb|lock| request fails;
+	\item Otherwise, the \verb|lock| request succeeds.
+\end{enumerate}
+Suppose client submits a request to \verb|unlock| a set of locks $V$, then the rule of \verb|unlock| is as followed:
+\begin{enumerate}[(a)]
+	\item If any lock in $V$ is locked by some other client right now, then the \verb|unlock| request fails;
+	\item Otherwise, the \verb|unlock| request succeeds.
+\end{enumerate}
+The \verb|query| request always succeeds, and it returns the locks currently held by the client.
+
+\subsubsection{Deadlock}
+This design effectively eliminates the possibility of a deadlock. The deadlock situation is when client $a$ holds lock $1$ and wants to acquire lock $2$, while client $b$ holds lock $2$ and wants to acquire lock $1$. In our design, a client is not allowed to acquire new lock when he or she has already held some lock. When client $a$ or $b$ wants to acquire both lock $1$ and $2$, he or she can only submit one \verb|lock| request to acquire both locks in one transaction. Whoever has his or her request executed first got both lock $1$ and $2$.
+
+\section{Implementation}
+
+\subsection{Overview}
+There are two parties in the implementation: \verb|PaxosServer| and \verb|PaxosClient|. Each party is implemented as a Java subclass of \verb|Node|. Especially, \verb|PaxosServer| and \verb|PaxosClient| contain handler methods to be called when (1) a message is received from either client or other Paxos server, or (2) a timeout set previously is triggered. The implementation of \verb|Node| manages all the network I/O and timeouts. It asynchronously call the handlers in \verb|PaxosServer| and \verb|PaxosClient| when the corresponding events are triggered.
+
+\subsection{Message}\label{sec:message}
+\verb|Message| is a Java interface implemented by all requests, replies, and additional messages like \verb|Ping| and \verb|Recover|. The communication between any two \verb|Node|s is the exchange of \verb|Message|s. The \verb|Message| interface is also a subinterface of \href{https://docs.oracle.com/javase/8/docs/api/java/io/Serializable.html}{Serializable}, \verb|Logged|, and \verb|Copyable|. Because \verb|Message| needs to be serialized and deserialized in network I/O, \verb|Serializable| is necessary. \verb|Logged| is for log purpose. \verb|Copyable| requires any class implementing \verb|Message| to have a \verb|immutableCopy()| method, which returns a copy of the \verb|Message| with a promise not to modify anything in the copy in the future. The necessity of \verb|Copyable| will be discussed in \S\ref{sec:copyable} under section \nameref{sec:concurrency}.
+
+\subsection{Timeout}
+\verb|Timeout| is a Java interface. It contains a single method \verb|timeoutLengthMillis()|, which tells \verb|Node| what time in future to call the \verb|Timeout|'s handler in \verb|PaxosServer| or \verb|PaxosClient|. The \verb|Timeout| implementation serves two purposes: (1) to periodically perform some operations like \verb|Ping|ing other servers, and (2) to resend some request in case the request is dropped due to network failure or some other reasons.
+
+\subsection{Node}
+The design logic of \verb|Node| is to handle all the network I/O and make asynchronous calls. Thus, its subclasses \verb|PaxosServer| and \verb|PaxosClient| can focus on the Paxos protocol. When a \verb|Message| arrives at \verb|Node|, it will call its subclass' handler method through Java reflection. In particular, for a \verb|Message| with class \verb|MessageClass|, it will call a method with signature \verb|handleMessageClass(MessageClass, Address)|. The \verb|MessageClass| parameter is the message, and the \verb|Address| parameter is the address of sender. For example, if \verb|Node| receives a \verb|PrepareRequest|, it will call the method \verb|handlePrepareRequest(PrepareRequest, Address)|. Similarly, for \verb|Timeout|, if a \verb|Timeout| is triggered, the \verb|Node| will call a method with signature \verb|onTimeoutClass(TimeoutClass)|. It is the responsibility of \verb|Node|'s subclasses to implement such methods for all \verb|Message|s and \verb|Timeout|s that are possible for \verb|Node| to receive and trigger.
+
+\subsubsection{ArrayBlockingSetQueue}
+\verb|ArrayBlockingSetQueue| is a data structure implemented for producer-consumer queues. It is a subclass of \href{https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ArrayBlockingQueue.html}{ArrayBlockingQueue} in Java standard library. A \href{https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/BlockingQueue.html}{BlockingQueue}, defined by Java standard library, is a queue that gives producer/consumer an option to wait until it is possible to enqueue/dequeue an element. \verb|ArrayBlockingQueue| is a \verb|BlockingQueue| with limited capacity, and \verb|ArrayBlockingSetQueue| additionally ensures that all elements in \verb|ArrayBlockingQueue| are distinct. The \verb|ArrayBlockingSetQueue| data structure serves two purposes:
+\begin{itemize}
+	\item Used by \verb|ConnectionPool| as \verb|outboundPackages| queue to store any \verb|Message|s submitted by \verb|Node| but not yet send out by any one of the \verb|SendTask| threads of \verb|ConnectionPool|. In such scenario, \verb|Node| is the producer, and \verb|SendTask| threads are the consumers.
+	\item Provided to the constructor of \href{https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ThreadPoolExecutor.html}{ThreadPoolExecutor} as an internal structure to store \verb|Message| handling tasks submitted but not yet executed by thread pool.
+\end{itemize}
+The main reason why we need \verb|ArrayBlockingSetQueue| instead of provided \verb|ArrayBlockingQueue| is to ensure the queues have distinct elements. After all, it is undesirable for \verb|ConnectionPool| to send duplicated \verb|Message|s or for \verb|ThreadPoolExecutor| to handle duplicated \verb|Message|s. In addition, for \verb|ConnectionPool|, the \verb|ArrayBlockingSetQueue| implements an additional feature to discard the oldest \verb|Message| when enqueueing a new \verb|Message| to a full queue. The underlying logic is that the info of old \verb|Message| may already be out-of-date. It is more reasonable to keep the new \verb|Message| in queue during network congestion.
+
+\subsubsection{ConnectionPool}
+\verb|ConnectionPool| is implemented for \verb|Node| to handle network I/O. When \verb|Node| wants to send some message to another \verb|Node| or \verb|Node| has accepted an incoming connection through listening, it creates a \verb|ConnectionPool| dedicated to the network communication between it and the other \verb|Node|. If a \verb|Node| is communicating with ten other \verb|Node|s, then it maintains ten \verb|ConnectionPool|s.\\
+
+\verb|ConnectionPool| usually maintains a number of TCP connections. Each connection has a dedicated \verb|SendTask| thread and a \verb|ReceiveTask| thread:
+
+\paragraph{SendTask}The \verb|SendTask| thread continuously ``poll''s \verb|Package|s from the \verb|outboundPackages| queue. Each \verb|Package| is a wrapper of one \verb|Message|. The queue is a \verb|ArrayBlockingSetQueue|, and its ``poll'' method lets the caller thread to dequeue an element if available or wait up to a specific timeout. In \verb|SendTask|, this timeout is a constant \verb|TEST_ALIVE_INTERVAL|\footnote{current set to 500ms.}. If the ``poll'' timeouts, \verb|SendTask| will send a special \verb|TestAlive| \verb|Message|. The reason why \verb|SendTask| does this is to ensure that the \verb|SendTask| sends a message through the connection every \verb|TEST_ALIVE_INTERVAL|. Thus, if a connection fails, the \verb|ConnectionPool| of both sides can quickly discover the failure by setting \href{https://docs.oracle.com/javase/8/docs/api/java/net/Socket.html#setSoTimeout-int-}{SO\_TIMEOUT}.\\
+
+\verb|SendTask| sends the \verb|Package| using the object serialization provided by Java standard library. The \verb|Package| is firstly written to an \href{https://docs.oracle.com/javase/8/docs/api/java/io/ObjectOutputStream.html}{ObjectOutputStream}, which outputs to a \href{https://docs.oracle.com/javase/8/docs/api/java/io/BufferedOutputStream.html}{BufferedOutputStream} and then to the socket OutputStream. The reason why we use a \verb|BufferedOutputStream| in the middle is due to a finding that using a \verb|BufferedInput/OutputStream| between \verb|ObjectInput/OutputStream| and socket \verb|Input/OutputStream| brings order of magnitude increase in network I/O efficiency\footnote{\href{https://stackoverflow.com/questions/23506651/why-is-inputstream-readobject-taking-so-much-of-time-reading-the-serialized-obje}{https://stackoverflow.com/questions/23506651/why-is-inputstream-readobject-taking-so-much-of-time-reading-the-serialized-obje}}. \verb|SendTask| flushes \verb|ObjectOutputStream| every time it writes a \verb|Package| to ensure timely delivery.\\
+
+A special case of \verb|SendTask| happens when the connection is the first connection created by the \verb|Node|. In such case, the other side of the connection only knows the IP address of this \verb|Node| but not the port number. This brings a problem since all \verb|Node|s are addressed by the combination of IPv4 address and listening port number. Thus, in such case, the very first two bytes written by \verb|SendTask| will be the listening port number of this \verb|Node|. In the meantime, when a \verb|Node| accepts a new incoming connection, it will read the very first two bytes as the port number of the creator of connection.
+
+\paragraph{ReceiveTask}The \verb|ReceiveTask| thread continuously read from the connection. Like \verb|SendTask|, it uses a $\verb|ObjectInputStream|\leftarrow\verb|BufferedInputStream|\leftarrow\verb|SocketInputStream|$ design. Every time \verb|ReceiveTask| reads a \verb|Message|, it calls a handler from \verb|Node|, which will assign a work thread to call the corresponding \verb|Message| handler in \verb|Node|'s subclass. Thus, \verb|ReceiveTask| does not need to wait until the \verb|Message| is handled. It can immediately get back to reading new \verb|Message| from the connection. As mentioned in \verb|SendTask|, \verb|ReceiveTask| sets the \verb|SO_TIMEOUT| to a constant \verb|TEST_ALIVE_TIMEOUT|\footnote{currently set to $3\times\text{TEST\_ALIVE\_INTERVAL}=$1500ms.}. If the read operation of \verb|ReceiveTask| waits more than \verb|TEST_ALIVE_TIMEOUT|, it determines that the connection fails and then orderly close the connection. Closing the connection causes corresponding \verb|SendTask| to experience write failure and thus terminates \verb|SendTask| thread.
+
+\paragraph{ConnectionCreationTask}Besides the \verb|SendTask| thread and \verb|ReceiveTask| thread for each TCP connection in \verb|ConnectionPool|, the \verb|ConnectionPool| also has a long-lived \verb|ConnectionCreationTask| thread running from the construction of \verb|ConnectionPool| to its closure. \verb|ConnectionCreationTask| does only one task: to create new TCP connection when the number of connections is lower than constant \verb|MIN_NUM_OF_CONNECTIONS|\footnote{currently set to 10.} or \verb|outboundPackages| is full. If none of these two criteria is met, then the thread enters \verb|wait|. The thread is \verb|notify|ed every time a connection is closed or \verb|outboundPackages| is full.\\
+
+Besides some network advantages of concurrent TCP connections, there are two particular reasons why we need multiple connections in \verb|ConnectionPool|:
+\begin{itemize}
+	\item When two \verb|Node|s want to connect to each other at the same time, there will be two TCP connections created. If we do not allow multiple connections, then dropping which one would be a problem.
+	\item The sending and receiving involve object serialization and deserialization. These operations are expensive, so by having multiple \verb|SendTask| and \verb|ReceiveTask| threads, one can parallel the workload to increase network I/O efficiency.
+\end{itemize}
+However, creating too many connections also brings problems. Thus, we limit the number of connections to be less than or equal to a constant \verb|MAX_NUM_OF_CONNECTIONS|\footnote{currently set to $4\times\text{MIN\_NUM\_OF\_CONNECTIONS}=40$}.
+
+\subsection{PaxosServer}
+\verb|PaxosServer| has the implementation of all Paxos protocol. In particular, it contains the callback handlers for the requests and replies described in \S\ref{sec:paxos}. In this section, we will be talking about the implementation of parts in \verb|PaxosServer|.
+
+\subsubsection{PaxosServer.Slots}
+\verb|PaxosServer.Slots| is the underlying data structure of \verb|executed| mentioned in \S\ref{sec:batch}. \verb|PaxosServer.Slots| uses \href{https://docs.oracle.com/javase/8/docs/api/java/util/ArrayDeque.html}{ArrayDeque} to store commands in \verb|executed|, and it keeps the \verb|Slot| number of the very first command in \verb|ArrayDeque|. Thus, it knows the \verb|Slot| number of every command in \verb|ArrayDeque| even if commands before the first one has been garbage collected. Every time \verb|PaxosServer| executes a command, it is enqueued into the \verb|ArrayDeque| of \verb|PaxosServer.Slots|. If the \verb|PaxosServer| discovers every server has executed some \verb|Slot|, then any command before and in the \verb|Slot| will be removed from \verb|ArrayDeque|. Note that by design, if a \verb|PaxosServer| has executed the command in \verb|Slot| $n$, then it has executed all commands from \verb|Slot| $0$ to $n$.
+
+\subsubsection{Application}
+\verb|Application| is where the service logic implemented. In our implementation, \verb|Application| is a Java interface, which provides a method \verb|Result execute(Command)|. Each request received from the client contains a \verb|Command| to be executed by the \verb|Application|, and the returned \verb|Result| will be in the reply to client. In this project, the lock service described in \S\ref{sec:lockservice} is implemented as a \verb|LockApplication|.
+
+\paragraph{AMOApplication}\verb|AMO| stands for ``at most once''. \verb|AMOApplication| is a wrapper over \verb|Application|. By assumption \ref{ass:5}, the client can assign a strictly increasing \verb|sequenceNum| for each command he or she submits. Once \verb|AMOApplication| has let the \verb|Application| execute a command from a client with \verb|sequenceNum| $x$, then it ensures that any command submitted by the same client with \verb|sequenceNum| less than or equal to $x$ cannot be executed by \verb|Application|. In particular, \verb|AMOApplication| stores results of the latest commands submitted by all clients. Thus, when \verb|PaxosServer| receives a command \verb|Application| has already executed, \verb|AMOApplication| can prevent \verb|PaxosServer| from going through the Paxos algorithm for this command again and directly reply the client with result if the command is the latest one. Note that if the command is not the latest one, by assumption \ref{ass:5}, the client has already got the result of the command.
+
+\subsubsection{PaxosServer.Leader}
+\verb|PaxosServer.Leader| is a data structure to maintain the leader state when the \verb|PaxosServer| is the leader of the Paxos group. For example, \verb|PaxosServer.Leader| records the \verb|pendingCommands| mentioned in \S\ref{sec:batch} and addresses of the servers who has not yet replied \verb|PrepareRequest| or \verb|AcceptRequest|.
+
+\subsubsection{PaxosServer.Acceptor}
+\verb|PaxosServer.Acceptor| is a data structure to maintain the acceptor state. It is maintained at all time since every server is always an acceptor even if it has been elected as the leader. It has only two fields \verb|maxProposalNum| and \verb|maxAcceptNum|.
+
+\subsection{PaxosClient}
+\verb|PaxosClient| has the implementation of a client to submit \verb|PaxosRequest| to \verb|PaxosServer|s. It follows assumption \ref{ass:5}, and assign strictly increasing \verb|sequenceNum| to commands it submits. If a request is not replied for time period longer than \verb|ClientTimeout|\footnote{currently set at 100ms}, then a \verb|ClientTimeout| will be triggered, and \verb|PaxosClient| will resend the \verb|PaxosRequest|.
+
+\subsection{Concurrency}\label{sec:concurrency}
+The implementation uses multiple tools of Java to handle concurrency issues. For \verb|PaxosServer| and \verb|PaoxsClient|, because only the handler methods for \verb|Message|s and \verb|Timeout|s will be called, these methods use \verb|synchronized| keyword to ensure proper locking and unlocking.\\
+
+For data structures such as \verb|Map| and counters in \verb|Node| and \verb|ConnectionPool|, the implementation conveniently uses \href{https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ConcurrentHashMap.html}{ConcurrentHashMap}, \href{https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/atomic/AtomicLong.html}{AtomicLong}, and \href{https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/atomic/LongAdder.html}{LongAdder} from Java standard library to ensure thread safety.\\
+
+For \verb|ArrayBlockingSetQueue|, since it is a subclass of \verb|ArrayBlockingQueue|, the implementation uses Java reflection to access the parent's \href{https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/locks/ReentrantLock.html}{ReentrantLock}. In every method, \verb|ArrayBlockingSetQueue| locks the parent's \verb|ReentrantLock| and release it at the end of the method. Because \verb|ReentrantLock| can be locked by the same thread multiple times, superclass' methods are unaffected when \verb|ArrayBlockingSetQueue| calls them while holding the lock.
+
+\subsubsection{Copyable}\label{sec:copyable}
+As mentioned in \S\ref{sec:message}, \verb|Copyable| is an interface to force \verb|Message| to provide an immutable copy of itself. To see why \verb|Copyable| is necessary, consider a scenario when \verb|PaxosServer| wants to send a \verb|Message|. \verb|PaxosServer| calls the \verb|send| method in \verb|Node|, who simply enqueues the \verb|Message| to an underlying queue and then returns. The \verb|SendTask| thread of some \verb|ConnectionPool| will later dequeues the \verb|Message| and perform network I/O. This implementation requires the \verb|Message| to be unmodified while it is in the queue; otherwise, the \verb|Message| eventually send is different from what \verb|PaxosServer| intended. However, the \verb|Message| usually contains some internal state of \verb|PaxosServer| like \verb|executed| that may be changed by \verb|PaxosServer| thread right away. It is also undesirable to make \verb|PaxosServer| thread blocked until the \verb|SendTask| finishes network I/O. Thus, the solution is to let the \verb|send| method in \verb|Node| call the \verb|immutableCopy()| to enqueue an immutable copy of the \verb|Message|.
+
+\subsubsection{Thread Pools}
+The implementation uses multiple \href{https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ThreadPoolExecutor.html}{ThreadPoolExecutor}s from Java standard library to realize a thread pool design. In addition, the implementation uses \href{https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ScheduledThreadPoolExecutor.html}{ScheduledThreadPoolExecutor} to realize the triggering of \verb|Timeout|s in future. Thread pools are carefully tuned to ensure high throughput of the system.
+
+\paragraph{PaxosServer}For \verb|Message| handling tasks, \verb|PaxosServer| uses a \verb|ThreadPoolExecutor| with thread pool size fixed to a constant \verb|MESSAGE_HANDLER_EXECUTOR_NUM_OF_THREAD|\footnote{currently set to 5.} and \verb|ArrayBlockingSetQueue| as the \verb|workQueue| of \verb|ThreadPoolExecutor| with fixed capacity \verb|MESSAGE_HANDLER_EXECUTOR_QUEUE_SIZE|\footnote{currently set to 100.}. The reason why \verb|PaxosServer| uses a small fixed size thread pool is that all \verb|Message| handler methods are marked by \verb|synchronized| Java keyword, so the locking forbids \verb|PaxosServer| from having many threads working together. As for fixed capacity \verb|workQueue|, when there are too many \verb|Message|s waiting to be handled, the design allows \verb|PaxosServer| to simply ignore some \verb|Message|s until workload spike passes. Because unlimited \verb|workQueue| never ignores or rejects a \verb|Message| handling task, it may affect the responsiveness of \verb|PaxosServer|, when more and more \verb|Message|s are built up in the queue. Under some test situation, the queue can get even long enough to take all of JVM heap memory.
+
+\paragraph{Node}The implementation of \verb|Node| uses two thread pools for its tasks: a \verb|ThreadPoolExecutor| with an unlimited thread pool size and a \verb|ScheduledThreadPoolExecutor| with thread pool size fixed to 5. \verb|Node| uses \verb|ThreadPoolExecutor| to finish tasks like logging, \verb|ConnectionPool| garbage collection, and adding incoming connection to \verb|ConnectionPool| when accepted from listening port. The \verb|ThreadPoolExecutor| is also passed to \verb|ConnectionPool| to create threads like \verb|SendTask| and \verb|ReceiveTask|. The threads of \verb|Node| are largely independent and equally important, so there is no need to tune \verb|ThreadPoolExecutor| in \verb|Node|. \verb|ScheduledThreadPoolExecutor| is used to handle all \verb|Timeout|s and periodical logging. It has a small size thread pool because what it does is simply assigning the work to \verb|ThreadPoolExecutor| when it is time.
+
+\section{Deployment}
+The project is implemented in Java 8 and tested in ARM version Ubuntu 20.04.3 LTS virtual machines. Besides Java standard library, the project also uses Apache Commons Lang 3.12.0 and Lombok 1.18.12.\\
+
+To properly run the project, \verb|PaxosServer| and \verb|PaxosClient| require a config file with IPv4 addresses of all \verb|PaxosServer|s. For example, to setup a Paxos group of 3 servers on local machine listening to port 2000, 3000, and 4000 respectively, one needs to create a \verb|server_ips.config| file:
+\begin{verbatim}
+127.0.0.1:2000
+127.0.0.1:3000
+127.0.0.1:4000
+\end{verbatim}
+The commands to run \verb|PaxosServer|s are:
+\begin{verbatim}
+java -jar paxos_server.jar 127.0.0.1:2000 server_ips.config
+java -jar paxos_server.jar 127.0.0.1:3000 server_ips.config
+java -jar paxos_server.jar 127.0.0.1:4000 server_ips.config
+\end{verbatim}
+The command to run a \verb|PaxosClient| using port 5000 on local machine is:
+\begin{verbatim}
+java -jar paxos_client.jar 127.0.0.1:5000 server_ips.config
+\end{verbatim}
+
+\section{Test}
+The Paxos protocol of this project directly uses JUnit tests of DsLabs for testing. Besides, the project also includes a \verb|TestClient| to test in distributed runtime environment. The \verb|TestClient| works by continuously generating random \verb|LockCommand|s. It executes the commands on local \verb|LockApplication| while sending the commands to Paxos group. It is expected that the results returned by the Paxos group should be identical to the results returned by \verb|TestClient| executing commands locally. Similar to \verb|PaxosServer| and \verb|PaxosClient|, the command to run \verb|TestClient| using port 5000 is:
+\begin{verbatim}
+java -jar test_client.jar 127.0.0.1:5000 server_ips.config
+\end{verbatim}
+
+\section{Future Improvements}
+Due to the limited time of this project, there are some improvements to the project considered but not implemented by the author.
+
+\subsection{Copy and Serialization}
+The workflow of \verb|Node| sending a \verb|Message| is to (1) obtain an immutable copy of the \verb|Message|, (2) enqueue the immutable copy to queue, (3) dequeue the copy, and then (4) serialize it to send through socket's \verb|OutputStream|. However, serializing the \verb|Message| has already copied the object in some sense. An improvement is to directly serialize the \verb|Message| into bytes and enqueue the bytes into the queue. Thus, the \verb|SendTask| thread can simply dequeue the bytes and send through socket's \verb|OutputStream|. However, the problem unsolved is that the object serialization can only been done by creating an \verb|ObjectOutputStream|. Every time an \verb|ObjectOutputStream| is created, it writes an initial header to underlying \verb|OutputStream|. When the \verb|ObjectInputStream| tries to deserialize the stream of bytes, it only expects the initial header at the very beginning. If every object contains an initial header, the \verb|ObjectInputStream| will throw \verb|Exception|s.
+
+\subsection{Concurrency of PaxosServer}
+The current implementation of \verb|PaxosServer| uses Java \verb|synchronized| keyword to ensure thread safety. This is the most naive design, which only allows threads to finish their works one by one. A more desirable and complicated design is to add locks for individual data structures. One may also use read/write locks to enhance parallelism.
+
+\subsection{Write Commands to Disk}
+In \S\ref{sec:gc}, we mentioned that if all servers have executed the command in \verb|Slot| $n$, then the command is garbage collected and removed from memory. Thus, the \verb|PaxosServer| can continuously process commands without running out of memory. In some cases, when some server is down for too long, the number of commands in alive servers is continuously built up. To prevent running out of memory, the current design stops the servers from processing new commands if the number of commands in memory exceeds some point. At that time, only if the failed server is recovered, the commands in servers can be garbage collected and then processing new commands. In such situation, one may want the alive servers to continue processing commands while storing the commands in disk. When the failed server is alive again, the other servers can read commands from disk to help the failed server recover. Furthermore, one may want all the commands written to disk for the purpose of logging or debugging.
+
+\end{document}
